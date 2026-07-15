@@ -51,7 +51,7 @@ A local-first RAG endpoint that sits **behind** an LLM gateway as a provider. A 
 | Ingestion + retrieval | **Python** (`ingest.py`, `retrieve()`) | naive fixed-size chunker (~500 tok, ~50 overlap) |
 | Local model serving | **Ollama** (host process) | `qwen3:0.6b` (already pulled) + `nomic-embed-text`, OpenAI-compatible routes. Upgrade → 1.7b/4b only if Phase 6 eval shows weak synthesis |
 | Vector DB | **Qdrant** (Docker image) | persistent volume, cosine, 768-dim |
-| Gateway (PoC) | **Gravitee APIM v4** | LLM Proxy; external gateway `:8082` on `docker_default` |
+| Gateway (PoC) | **Gravitee APIM v4** (only adapter in v1) | LLM Proxy; external gateway `:8082` on `docker_default` |
 | Gateway adapter | **Python** (`GatewayAdapter` + `GraviteeAdapter`) | pushes config via Management API |
 | Dashboard | **Router-served HTML/JS** (no framework, no extra container) | stats view + threshold knob + gateway-connect form |
 | Orchestration | **Docker Compose** | services: `vectordb`, `router` (Ollama on host) |
