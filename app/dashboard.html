@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>local0</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --plane: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --local: #0ca30c;      /* status good */
+    --escalate: #eb6834;   /* categorical orange */
+    --series: #2a78d6;     /* sequential blue */
+    --radius: 14px;
+    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --plane: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7;
+      --muted: #898781; --grid: #2c2c2a; --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --local: #0ca30c; --escalate: #eb6834; --series: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    --plane: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --local: #0ca30c; --escalate: #eb6834; --series: #3987e5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--font); background: var(--plane); color: var(--ink);
+    -webkit-font-smoothing: antialiased; padding: 32px 20px 64px;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+  h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-2); font-size: 13px; margin: 2px 0 28px; }
+  .theme-btn {
+    background: var(--surface); border: 1px solid var(--border); color: var(--ink-2);
+    border-radius: 999px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-family: var(--font);
+  }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 18px;
+  }
+  .tile .label { font-size: 12px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .tile .value { font-size: 30px; font-weight: 650; line-height: 1; letter-spacing: -0.02em; }
+  .tile .unit { font-size: 15px; color: var(--ink-2); font-weight: 500; }
+  .tile.accent .value { color: var(--escalate); }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 20px;
+  }
+  .card h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+  .card .hint { font-size: 12px; color: var(--muted); margin: 0 0 16px; }
+  /* split meter */
+  .meter { height: 12px; border-radius: 999px; overflow: hidden; display: flex; background: var(--grid); }
+  .meter > span { display: block; }
+  .meter .m-local { background: var(--local); }
+  .meter .m-esc { background: var(--escalate); }
+  .legend { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: var(--ink-2); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  /* histogram */
+  .hist { position: relative; height: 150px; display: flex; align-items: flex-end; gap: 3px; padding-top: 8px; }
+  .hist .bar { flex: 1; background: var(--series); border-radius: 4px 4px 0 0; min-height: 2px; transition: height .3s; }
+  .hist .bar.dim { opacity: 0.32; }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .thmark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--escalate); }
+  .thmark::after { content: attr(data-l); position: absolute; top: -2px; left: 6px; font-size: 11px; color: var(--escalate); white-space: nowrap; }
+  /* slider */
+  .slider-row { display: flex; align-items: center; gap: 16px; margin-top: 4px; }
+  input[type=range] { flex: 1; accent-color: var(--escalate); }
+  .tval { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 18px; min-width: 52px; }
+  .btn {
+    background: var(--ink); color: var(--plane); border: none; border-radius: 10px;
+    padding: 9px 16px; font-size: 13px; font-weight: 550; cursor: pointer; font-family: var(--font);
+  }
+  .btn.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--border); }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .saved { font-size: 12px; color: var(--local); opacity: 0; transition: opacity .2s; }
+  .saved.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>local0</h1>
+      <p class="sub">Local-first RAG · escalates weak retrieval to cloud via HTTP 424</p>
+    </div>
+    <button class="theme-btn" id="theme">◐ theme</button>
+  </header>
+
+  <section class="tiles">
+    <div class="tile"><div class="label">Total</div><div class="value" id="t-total">0</div></div>
+    <div class="tile"><div class="label">Answered local</div><div class="value" id="t-local">0</div></div>
+    <div class="tile accent"><div class="label">Escalated</div><div class="value"><span id="t-pct">0</span><span class="unit">%</span></div></div>
+    <div class="tile"><div class="label">Cloud $ avoided</div><div class="value"><span class="unit">$</span><span id="t-usd">0</span></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Routing split</h2>
+    <p class="hint">Share of requests answered locally vs escalated to the cloud model.</p>
+    <div class="meter"><span class="m-local" id="m-local"></span><span class="m-esc" id="m-esc"></span></div>
+    <div class="legend">
+      <span><i style="background:var(--local)"></i>Local <span id="l-local">0</span></span>
+      <span><i style="background:var(--escalate)"></i>Escalated <span id="l-esc">0</span></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Retrieval top-score distribution</h2>
+    <p class="hint">Each request's best cosine score. Bars left of the marker escalate; right answer locally.</p>
+    <div class="hist" id="hist"><div class="thmark" id="thmark" data-l="0.55"></div></div>
+    <div class="axis"><span>0.0</span><span>0.5</span><span>1.0</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Escalation threshold</h2>
+    <p class="hint">Lower = more answered locally (risk wrong answers). Higher = escalates sooner. Persisted to .env.</p>
+    <div class="slider-row">
+      <input type="range" id="slider" min="0" max="1" step="0.01" value="0.55" />
+      <span class="tval" id="tval">0.55</span>
+    </div>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn" id="save">Save threshold</button>
+      <button class="btn ghost" id="reset">Reset stats</button>
+      <span class="saved" id="saved">saved ✓</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Learn callback</h2>
+    <p class="hint">Fakes the gateway POST after 424→cloud. Stores only if query matches LEARN_TAGS (default includes <code>refund</code>).</p>
+    <div class="row">
+      <button class="btn ghost" id="seed-learn">Test /learn</button>
+      <span class="saved" id="learn-msg"></span>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// theme toggle (light ⇄ dark), overrides OS
+$("theme").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const next = cur === "dark" ? "light" : cur === "light" ? "dark"
+    : (matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", next);
+};
+
+let threshold = 0.55, dragging = false;
+
+function renderHist(hist, buckets, th) {
+  const el = $("hist");
+  const max = Math.max(1, ...hist);
+  el.querySelectorAll(".bar").forEach(b => b.remove());
+  const mark = $("thmark");
+  hist.forEach((v, i) => {
+    const bar = document.createElement("div");
+    bar.className = "bar" + ((i / buckets) < th ? " dim" : "");
+    bar.style.height = (100 * v / max) + "%";
+    bar.title = `${(i/buckets).toFixed(2)}–${((i+1)/buckets).toFixed(2)}: ${v}`;
+    el.insertBefore(bar, mark);
+  });
+  mark.style.left = (th * 100) + "%";
+  mark.setAttribute("data-l", th.toFixed(2));
+}
+
+async function poll() {
+  try {
+    const s = await (await fetch("/stats")).json();
+    $("t-total").textContent = s.total;
+    $("t-local").textContent = s.answered_local;
+    $("t-pct").textContent = s.escalated_pct;
+    $("t-usd").textContent = s.est_usd_avoided;
+    $("l-local").textContent = s.answered_local;
+    $("l-esc").textContent = s.escalated;
+    const tot = s.total || 1;
+    $("m-local").style.width = (100 * s.answered_local / tot) + "%";
+    $("m-esc").style.width = (100 * s.escalated / tot) + "%";
+    if (!dragging) {
+      threshold = s.threshold;
+      $("slider").value = threshold;
+      $("tval").textContent = threshold.toFixed(2);
+    }
+    renderHist(s.histogram, s.buckets, threshold);
+  } catch (e) { /* router restarting — next tick retries */ }
+}
+
+$("slider").addEventListener("input", e => {
+  dragging = true;
+  threshold = parseFloat(e.target.value);
+  $("tval").textContent = threshold.toFixed(2);
+  $("thmark").style.left = (threshold * 100) + "%";
+  $("thmark").setAttribute("data-l", threshold.toFixed(2));
+  document.querySelectorAll(".hist .bar").forEach((b, i, arr) =>
+    b.classList.toggle("dim", (i / arr.length) < threshold));
+});
+
+$("save").onclick = async () => {
+  await fetch("/config", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({threshold})});
+  dragging = false;
+  $("saved").classList.add("show");
+  setTimeout(() => $("saved").classList.remove("show"), 1500);
+};
+
+$("reset").onclick = async () => { await fetch("/stats/reset", {method: "POST"}); poll(); };
+
+$("seed-learn").onclick = async () => {
+  const r = await fetch("/learn", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      query: "What is the refund policy?",
+      answer: "Full refund within 30 days of purchase.",
+    }),
+  });
+  const j = await r.json();
+  const el = $("learn-msg");
+  el.textContent = j.stored ? "stored ✓" : (j.reason || "skipped");
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 2000);
+};
+
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
