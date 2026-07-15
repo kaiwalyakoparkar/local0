@@ -6,7 +6,7 @@ Local-first RAG endpoint behind Gravitee LLM Proxy. Small local model (Qwen) ans
 **Gravitee owns:** routing, auth, semantic cache, guardrails, observability, cost tracking.
 
 > **Deployment reality (PoC against a local APIM stack)**
-> - Gravitee is **APIM v4**; gateway typically on **:8082** (not the entry/UI port). Attach to that stack's Docker network (often named `docker_default` when using the stock workshop compose — treat the name as an env-specific fact, not a hardcoded contract).
+> - Gravitee is **APIM v4**; gateway typically on **:8082** (not the entry/UI port). Attach to that stack's Docker network (compose network name varies — treat it as an env-specific fact, not a hardcoded contract).
 > - Register `router-service` the same way any other LLM-proxy upstream is registered: import/publish an API definition that points at `http://router-service:8081`.
 > - If the stack already runs Redis for Gravitee semantic cache, reuse it — nothing to add in this repo.
 > - **Ollama already runs on the host** (:11434, native process, not a container). See Phase 1 decision.
