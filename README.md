@@ -107,8 +107,10 @@ failover ignores HTTP status (proven by the Phase-0 smoke), so escalation needs 
 
 `app/gateway.py` (`GraviteeAdapter`) pushes an API definition that embeds **both
 providers + the 424→reroute policy** via the Management API — see
-`plans/merged-plan.md` Phase 4/4b. Concrete policy plugin ids should be copied
-from an existing LLM-proxy API definition in your APIM stack.
+`plans/merged-plan.md` Phase 4/4b. The concrete policy plugin ids should be copied
+from the running "Hermes LLM Proxy" import in
+[Gravitee-AI-Agent-Workshop](https://github.com/gravitee-io-labs/Gravitee-AI-Agent-Workshop)
+(`gravitee-init/apim-apis/Hermes-LLMs-1-0.json`).
 
 > **Open item (Phase 0.5):** confirm the gateway forwards the *original* user
 > messages (not the RAG-augmented body) to the cloud model on reroute; add a

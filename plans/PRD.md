@@ -4,7 +4,7 @@
 **Last updated:** 2026-07-15
 **Source plan:** `plans/merged-plan.md`
 
-**Doc authority:** PRD wins on *product* (what success means, scope, goals). `merged-plan.md` wins on *deploy + phase detail* (host Ollama, gateway Docker network, APIM gateway port, model tag, operational gotchas). On conflict: product wording → PRD; how-to-build → plan.
+**Doc authority:** PRD wins on *product* (what success means, scope, goals). `merged-plan.md` wins on *deploy + phase detail* (host Ollama, `docker_default`, Hermes template, gateway `:8082`, model tag, operational gotchas). On conflict: product wording → PRD; how-to-build → plan.
 
 ---
 
@@ -119,7 +119,7 @@ Router Service — FastAPI (:8081)
 - `GatewayAdapter` interface: `test_connection`, `deploy_router`, `undeploy`.
 - `GraviteeAdapter` deploy sequence: `POST /apis/import` → `POST /apis/{id}/plans` (publish) → `POST /apis/{id}/deployments` → `POST /apis/{id}/_start`. Bare create ≠ live route.
 - **The imported API definition MUST embed the 424→reroute response-policy + both providers** (router #1, big model #2). `deploy_router` owns the whole escalation mechanism, not just endpoint registration — else the operator hand-wires the policy and the zero-console-clicks metric fails.
-- Pin Gravitee **v4** MAPI schema (paths/verbs differ v3 vs v4). Reuse an existing LLM-proxy API definition as the payload template.
+- Pin Gravitee **v4** MAPI schema (paths/verbs differ v3 vs v4). Reuse existing Hermes import as payload template.
 
 ---
 

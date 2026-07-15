@@ -16,13 +16,15 @@ Implemented. Service code lives under `app/` (`main.py`, `rag.py`, `ollama.py`, 
 
 ## Critical cross-repo context (not discoverable from this repo)
 
-This router plugs into a **separate Gravitee APIM Docker stack** (not shipped here):
+This router plugs into the public Gravitee workshop stack
+([gravitee-io-labs/Gravitee-AI-Agent-Workshop](https://github.com/gravitee-io-labs/Gravitee-AI-Agent-Workshop)),
+typically checked out as a sibling at `../Gravitee-AI-Agent-Workshop`:
 
-- Gravitee is **APIM v4**; gateway typically on **:8082**. Attach router + Qdrant to that stack's Docker network (compose often names it `docker_default` — confirm locally).
-- Register `router-service` like any other LLM-proxy upstream: import an API definition pointing at `http://router-service:8081`.
+- Gravitee is **APIM**, gateway on **:8082**, docker network **`docker_default`** (compose project under that repo's `docker/`). `am-gateway :8092` is Access Management (auth) — not the LLM path.
+- An **LLM Proxy already runs**: "Hermes LLM Proxy" at `/hermes-llm/` (ModelScope upstream), imported via that repo's `docker/setup.sh` / `docker/gravitee-management.yml`. Register `router-service` the same way — copy that template (`gravitee-init/apim-apis/Hermes-LLMs-1-0.json`).
 - **Ollama already runs on the host** (:11434, native, not a container). See Phase 1 for reuse-host vs containerize decision.
-- Reuse the stack's Redis for Gravitee semantic cache if present — nothing to add in this repo.
-- Gateway → router is **container DNS** (`http://router-service:8081`), not `localhost`.
+- **Redis semantic cache already up** (`gio-workshop-redis :6379`).
+- Gateway → router is **container DNS** (`http://router-service:8081`), not `localhost`. Router + Qdrant must join the external `docker_default` network to be reachable.
 
 ## Planned stack
 

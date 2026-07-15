@@ -114,10 +114,12 @@ def build_api_definition(router_url: str, fallback: Provider) -> dict:
     """V4 proxy API: router as endpoint #1, big model as #2, plus a response-phase
     policy that reroutes to #2 when the router replies 424.
 
-    Copy an existing LLM-proxy API definition from your APIM stack as the
-    concrete payload template — endpoint-group shape and policy plugin id come
-    from that live example. This is the structural skeleton; verify plugin ids
-    against the target APIM before first deploy.
+    Copy the running Hermes LLM Proxy import
+    (gravitee-io-labs/Gravitee-AI-Agent-Workshop
+    `Hermes-LLMs-1-0.json`) as the concrete payload template —
+    endpoint-group shape and policy plugin id come from that live example.
+    This is the structural skeleton; verify plugin ids against the target
+    APIM before first deploy.
 
     Phase-0.5 open item: confirm Gravitee forwards the ORIGINAL user messages to
     the fallback on reroute (not the RAG-augmented body). If augmented-only, add a

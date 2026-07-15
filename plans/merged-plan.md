@@ -5,12 +5,12 @@ Local-first RAG endpoint behind Gravitee LLM Proxy. Small local model (Qwen) ans
 **This service owns:** local model serving, vector DB + retrieval, escalation signal, gateway-config push (Phase 4b).
 **Gravitee owns:** routing, auth, semantic cache, guardrails, observability, cost tracking.
 
-> **Deployment reality (PoC against a local APIM stack)**
-> - Gravitee is **APIM v4**; gateway typically on **:8082** (not the entry/UI port). Attach to that stack's Docker network (compose network name varies — treat it as an env-specific fact, not a hardcoded contract).
-> - Register `router-service` the same way any other LLM-proxy upstream is registered: import/publish an API definition that points at `http://router-service:8081`.
-> - If the stack already runs Redis for Gravitee semantic cache, reuse it — nothing to add in this repo.
+> **Deployment reality (verified against [Gravitee-AI-Agent-Workshop](https://github.com/gravitee-io-labs/Gravitee-AI-Agent-Workshop))**
+> - Gravitee is **APIM** (`graviteeio/apim-gateway:4.12.0-milestone.2` in that repo's `docker/docker-compose.apim.yml`), gateway on **:8082**, NOT :8080. Stack lives in sibling `../Gravitee-AI-Agent-Workshop/docker`, docker network **`docker_default`**. (`am-gateway :8092` = Access Management / auth only — not the LLM path.)
+> - **LLM Proxy precedent already running:** "Hermes LLM Proxy" endpoint at `/hermes-llm/` (ModelScope upstream), imported via `setup.sh` / `gravitee-management.yml`. Register `router-service` the **same way** — no new mechanism to invent. Template: `gravitee-init/apim-apis/Hermes-LLMs-1-0.json`.
+> - **Semantic cache Redis already up** (`gio-workshop-redis :6379`) — Gravitee cache backing exists, nothing to add.
 > - **Ollama already runs on the host** (:11434, native process, not a container). See Phase 1 decision.
-> - Gateway → router is **container-to-container DNS** (`http://router-service:8081`), not `localhost`. Router + Qdrant must join the gateway's external Docker network or the gateway can't reach them.
+> - Gateway → router is **container-to-container DNS** (`http://router-service:8081`), not `localhost`. Router + Qdrant must join `docker_default` (external network) or the gateway can't reach them.
 > - Confirm the APIM gateway is healthy/serving before Phase 4.
 
 ---
@@ -132,7 +132,7 @@ Per request:
 
 **Entry gate (blocks Phase 4):** confirm the APIM gateway container is healthy and serving a known route (e.g. `curl :8082/<known-api>` → non-404). A stopped/unhealthy gateway silently 404s every route and Phase 4 stalls with no error. Verify before wiring, not during.
 
-- **Target = APIM gateway (typically :8082) on the stack's Docker network.** Attach router + vectordb to that external network. Copy an existing LLM-proxy API import from your APIM stack as the template — same import path, swap upstream to `http://router-service:8081`.
+- **Target = APIM gateway :8082 on `docker_default`.** Attach router + vectordb to that external network. Copy the existing **Hermes LLM Proxy** import (`setup.sh` / `gravitee-management.yml`, template `Hermes-LLMs-1-0.json`) as the template — same import path, swap upstream to `http://router-service:8081`.
 - Register `router-service` as OpenAI-compatible LLM Proxy endpoint (priority 1).
 - Register big model (Anthropic/OpenAI/Bedrock) as endpoint (priority 2).
 - **Prompt-forward already resolved in the Phase-0.5 spike** — wire the policy to match (passthrough branch if the spike found augmented-only forwarding).
@@ -171,7 +171,7 @@ GatewayAdapter:
 
 **Escalation-mechanism-per-adapter (post-Phase-0 note):** "swappable gateway" got heavier. Each adapter owns *how* its gateway reroutes on 424 (Gravitee = response-policy in the API def), not just endpoint registration. The `GatewayAdapter` interface is unchanged, but `deploy_router` for any future gateway must produce a working 424-reroute, not assume built-in failover.
 
-**Verify before writing adapter:** exact MAPI paths + deploy verbs differ v3 vs v4 — pin **v4** (new `/apis` schema for AI/LLM proxy). Reuse an existing LLM-proxy API definition as the payload template (Phase 4).
+**Verify before writing adapter:** exact MAPI paths + deploy verbs differ v3 vs v4 — pin **v4** (new `/apis` schema for AI/LLM proxy). Reuse the existing **Hermes** import as the payload template (Phase 4).
 
 **Check (runnable):** `test_connection` against live Gravitee returns ok; `deploy_router` produces a *started* API that routes; `undeploy` removes it. Assert MAPI token never appears in logs.
 
