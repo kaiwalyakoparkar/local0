@@ -1,11 +1,12 @@
 # local0 (Smart Local Router) — build plan
 
-Local-first RAG endpoint behind Gravitee LLM Proxy. Small local model (Qwen) answers when retrieval is strong; escalates to a big cloud model when weak. Ships as `docker compose up`.
+Local-first RAG endpoint behind an LLM gateway. Small local model (Qwen) answers when retrieval is strong; escalates to a big cloud model when weak. Ships as `docker compose up`.
 
 **This service owns:** local model serving, vector DB + retrieval, escalation signal, gateway-config push (Phase 4b).
-**Gravitee owns:** routing, auth, semantic cache, guardrails, observability, cost tracking.
+**The gateway owns:** routing, auth, semantic cache, guardrails, observability, cost tracking.
+**(PoC adapter: Gravitee APIM only — seam is `GatewayAdapter`.)**
 
-> **Deployment reality (verified against [Gravitee-AI-Agent-Workshop](https://github.com/gravitee-io-labs/Gravitee-AI-Agent-Workshop))**
+> **Deployment reality (verified against [Gravitee-AI-Agent-Workshop](https://github.com/gravitee-io-labs/Gravitee-AI-Agent-Workshop) — current PoC target)**
 > - Gravitee is **APIM** (`graviteeio/apim-gateway:4.12.0-milestone.2` in that repo's `docker/docker-compose.apim.yml`), gateway on **:8082**, NOT :8080. Stack lives in sibling `../Gravitee-AI-Agent-Workshop/docker`, docker network **`docker_default`**. (`am-gateway :8092` = Access Management / auth only — not the LLM path.)
 > - **LLM Proxy precedent already running:** "Hermes LLM Proxy" endpoint at `/hermes-llm/` (ModelScope upstream), imported via `setup.sh` / `gravitee-management.yml`. Register `router-service` the **same way** — no new mechanism to invent. Template: `gravitee-init/apim-apis/Hermes-LLMs-1-0.json`.
 > - **Semantic cache Redis already up** (`gio-workshop-redis :6379`) — Gravitee cache backing exists, nothing to add.
@@ -24,7 +25,7 @@ Local-first RAG endpoint behind Gravitee LLM Proxy. Small local model (Qwen) ans
 └───────────────────────────┬──────────────────────────────┘
                             ▼
 ┌──────────────────────────────────────────────────────────┐
-│      Gravitee LLM Proxy (:8080 entry, gateway :8082)      │
+│      LLM gateway (:8080 entry, gateway :8082 in PoC)       │
 │  Provider list, ordered:                                  │
 │   1. router-service  (local-first)                        │
 │   2. big-model API   (reroute target on 424)              │
@@ -219,7 +220,7 @@ Small UI to watch savings and tweak the gate. **Served by the router itself** �
 
 ## Phase 8 — Content (optional)
 - Write up the 424 escalation-contract decision — genuinely novel, fits API-gateway-governance angle.
-- Keep README scope narrow ("local-first RAG endpoint for Gravitee LLM Proxy") — avoid inviting RouteLLM / vLLM-Semantic-Router comparison.
+- Keep README scope narrow ("local-first RAG behind an LLM gateway"; Gravitee = current PoC only) — avoid inviting RouteLLM / vLLM-Semantic-Router comparison.
 
 ---
 

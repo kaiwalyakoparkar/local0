@@ -1,6 +1,6 @@
 # Router + Qdrant only. Ollama runs natively on the host (:11434) — reused, not
 # containerized (Phase 1). Both services join the external `docker_default`
-# network so the Gravitee gateway can reach the router at http://router-service:8081.
+# network so the LLM gateway can reach the router at http://router-service:8081.
 
 services:
   vectordb:
@@ -10,7 +10,7 @@ services:
       - qdrant_data:/qdrant/storage
     networks:
       - default
-      - gravitee
+      - gateway
 
   router-service:
     build: .
@@ -26,13 +26,13 @@ services:
       - vectordb
     networks:
       - default
-      - gravitee
+      - gateway
 
 volumes:
   qdrant_data:
 
 networks:
   default:
-  gravitee:
+  gateway:
     external: true
-    name: docker_default   # the running Gravitee stack's network (verified 2026-07-15)
+    name: docker_default   # external LLM-gateway stack network (PoC: Gravitee workshop)

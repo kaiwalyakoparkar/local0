@@ -71,7 +71,7 @@ A local-first RAG endpoint that sits **behind** an LLM gateway as a provider. A 
 User's Agent  (Claude / GPT / custom)
       │
       ▼
-Gravitee LLM Proxy (:8080 entry, gateway :8082)
+LLM gateway (:8080 entry, gateway :8082 in PoC)
    provider 1: router-service   (local-first)
    provider 2: big-model API     (policy reroute target on 424)
       │
@@ -87,7 +87,7 @@ Router Service — FastAPI (:8081)
    Qdrant                   Ollama (Qwen3 0.6B + nomic-embed)
 ```
 
-**Topology rule:** the router sits *behind* the gateway. The router only *raises* the 424 flag; the **gateway routes**. The router never fronts the gateway.
+**Topology rule:** the router sits *behind* the gateway. The router only *raises* the 424 flag; the **gateway routes**. The router never fronts the gateway. **v1 adapter:** Gravitee APIM only.
 
 ---
 
@@ -96,7 +96,7 @@ Router Service — FastAPI (:8081)
 - Router returns `424 Failed Dependency` when `top_score < THRESHOLD`, body `{"detail": "no local context, escalate"}`. It does **not** call the model.
 - **A response-based routing policy** (Phase 4) inspects the router's response; on status `424` it reroutes to provider #2 (big model).
 - **Built-in failover will NOT do this** — Phase-0 smoke (2026-07-15) proved it retries only on connection/transport failure and ignores HTTP status. The policy is mandatory; without it the client gets a raw 424 and nothing escalates.
-- **Open question (verify in Phase 4):** Gravitee must forward the *original* user messages to the big model, not the RAG-augmented prompt. If it only forwards the augmented body, add a passthrough branch.
+- **Open question (verify in Phase 4):** the gateway must forward the *original* user messages to the big model, not the RAG-augmented prompt. If it only forwards the augmented body, add a passthrough branch.
 
 ---
 
