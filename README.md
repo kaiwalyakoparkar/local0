@@ -46,7 +46,7 @@ rewrite. **v1 ships one adapter** (Gravitee APIM) — see Gateway wiring below.
 One command — checks prereqs, clones, pulls models, starts, ingests:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kaiwalyakoparkar/local0/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaiwalyakoparkar/local0/master/install.sh | bash
 ```
 
 Then open **http://localhost:8081/dashboard**, tune `THRESHOLD`, and you're live.
@@ -85,6 +85,37 @@ make eval      # sweep THRESHOLD against eval_set.json (Phase 6)
 make down
 ```
 
+## Gateway wiring
+
+The router only *raises* the 424 flag; **the gateway routes**. Many gateways'
+built-in failover ignores HTTP status (retries only on transport failure), so
+escalation needs a **response-based routing policy**: on upstream `424`,
+reroute to provider #2.
+
+Point your agent configuration at the gateway's local0 route:
+
+```yaml
+model:
+  base_url: http://localhost:8082/local0/v1
+custom_providers:
+  - name: gravitee-llm-proxy
+    base_url: http://localhost:8082/local0/v1
+```
+
+`app/gateway.py` defines `GatewayAdapter` and pushes an API definition that
+embeds **both providers + the 424→reroute policy** via the gateway Management
+API — see `plans/merged-plan.md` Phase 4/4b.
+
+> **Current PoC:** only a Gravitee APIM adapter is implemented. Wire it against
+> your APIM stack (sibling
+> [Gravitee-AI-Agent-Workshop](https://github.com/gravitee-io-labs/Gravitee-AI-Agent-Workshop)
+> works as a reference; copy the Hermes LLM Proxy API definition shape). A
+> second vendor adapter is a non-goal for v1.
+
+> **Open item (Phase 0.5):** confirm the gateway forwards the *original* user
+> messages (not the RAG-augmented body) to the cloud model on reroute; add a
+> passthrough branch if not.
+
 ## Dashboard (`:8081/dashboard`)
 
 Router-served, single page, no framework. Live routing counters, a top-score
@@ -116,27 +147,6 @@ Everything lives in `.env` (see `.env.example`). Key knobs:
 | `COLLECTION` | Qdrant collection name. |
 | `CLOUD_USD_PER_CALL` | dashboard cost estimate (gross avoided, not net). |
 | `LEARN_TAGS` | substrings that must appear in a query before `POST /learn` stores it. |
-
-## Gateway wiring
-
-The router only *raises* the 424 flag; **the gateway routes**. Many gateways'
-built-in failover ignores HTTP status (retries only on transport failure), so
-escalation needs a **response-based routing policy**: on upstream `424`,
-reroute to provider #2.
-
-`app/gateway.py` defines `GatewayAdapter` and pushes an API definition that
-embeds **both providers + the 424→reroute policy** via the gateway Management
-API — see `plans/merged-plan.md` Phase 4/4b.
-
-> **Current PoC:** only a Gravitee APIM adapter is implemented. Wire it against
-> your APIM stack (sibling
-> [Gravitee-AI-Agent-Workshop](https://github.com/gravitee-io-labs/Gravitee-AI-Agent-Workshop)
-> works as a reference; copy the Hermes LLM Proxy API definition shape). A
-> second vendor adapter is a non-goal for v1.
-
-> **Open item (Phase 0.5):** confirm the gateway forwards the *original* user
-> messages (not the RAG-augmented body) to the cloud model on reroute; add a
-> passthrough branch if not.
 
 ## Layout
 
