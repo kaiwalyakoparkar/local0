@@ -41,6 +41,10 @@ rewrite. **v1 ships one adapter** (Gravitee APIM) — see Gateway wiring below.
 - Docker + Docker Compose
 - **Ollama installed + running on the host** (`:11434`). `make quickstart` pulls the models for you.
 
+## 🎥 Quick demo
+
+<video src="assets/demo.mov" controls width="100%" title="local0 quick demo"></video>
+
 ## 🚀 Quickstart
 
 One command — checks prereqs, clones, pulls models, starts, ingests:
