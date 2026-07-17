@@ -43,7 +43,7 @@ rewrite. **v1 ships one adapter** (Gravitee APIM) — see Gateway wiring below.
 
 ## 🎥 Quick demo
 
-<video src="assets/demo.mov" controls width="100%" title="local0 quick demo"></video>
+[![local0 quick demo](assets/demo.gif)](assets/demo.mov)
 
 ## 🚀 Quickstart
 
