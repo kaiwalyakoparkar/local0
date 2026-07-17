@@ -167,8 +167,8 @@
     <h2>Learn tags <span class="unit" style="font-size:13px">· <span id="learned-count">0</span> cached</span></h2>
     <p class="hint">Keywords worth caching. When an escalated query contains one of these, the gateway's cloud answer is vectorized into Qdrant so it answers locally next time. Comma-separated. Persisted to .env.</p>
     <div class="row">
-      <input type="text" id="tags" style="flex:1" placeholder="gravitee" />
-      <button class="btn" id="save-tags">Save tags</button>
+      <input type="text" id="tags" style="flex:1" placeholder="type a tag, Enter to add" />
+      <button class="btn" id="save-tags">Add tags</button>
       <span class="saved" id="tags-saved">saved ✓</span>
     </div>
     <div class="tag-list" id="tag-list"></div>
@@ -271,7 +271,6 @@ async function poll() {
     renderHist(s.histogram, s.buckets, threshold);
     $("learned-count").textContent = s.learned;
     learnTags = s.learn_tags || [];
-    if (document.activeElement !== $("tags")) $("tags").value = learnTags.join(", ");
     $("tag-list").innerHTML = learnTags.map(t => {
       const safe = t.replace(/[<>&]/g, "");
       return `<span class="chip">${safe}<button class="chip-x" data-tag="${safe}" title="remove">×</button></span>`;
@@ -313,9 +312,12 @@ $("reset").onclick = async () => { await fetch("/stats/reset", {method: "POST"})
 $("save-tags").onclick = async () => {
   const el = $("tags-saved");
   el.classList.remove("err");
+  // add typed tag to existing set (empty input = no-op, never wipes chips)
+  const merged = [...learnTags, $("tags").value.trim()].filter(Boolean);
   const r = await fetch("/config", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({tags: $("tags").value})});
+    body: JSON.stringify({tags: [...new Set(merged)].join(", ")})});
   if (r.ok) {
+    $("tags").value = "";
     el.textContent = "saved ✓";
     el.classList.add("show");
     setTimeout(() => el.classList.remove("show"), 1500);
