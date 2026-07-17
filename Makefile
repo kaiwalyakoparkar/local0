@@ -1,4 +1,4 @@
-.PHONY: help setup models up down ingest demo quickstart eval test logs seed-learn
+.PHONY: help setup models up down fresh ingest demo quickstart eval test logs seed-learn
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -15,6 +15,13 @@ up:      ## Start router + qdrant
 
 down:    ## Stop everything
 	docker compose down
+
+fresh:   ## Clean slate: wipe Qdrant volume, rebuild, restart, re-ingest (use to test updates)
+	docker compose down -v
+	docker compose up --build -d
+	@echo "waiting for qdrant..." && sleep 6
+	$(MAKE) ingest
+	@echo "\nFresh stack up → dashboard at http://localhost:8081/dashboard (cache empty, tags=gravitee)"
 
 ingest:  ## Ingest ./docs into Qdrant (run inside the router container)
 	docker compose exec router-service python ingest.py
@@ -39,5 +46,5 @@ logs:    ## Tail router logs
 seed-learn: ## POST fake {query,answer} to /learn (proves tag-match → upsert)
 	curl -sS -X POST http://localhost:8081/learn \
 		-H 'Content-Type: application/json' \
-		-d '{"query":"What is the refund policy?","answer":"Full refund within 30 days of purchase."}'
+		-d '{"query":"What is Gravitee?","answer":"Gravitee is an open-source API management platform (APIM)."}'
 	@echo

@@ -27,9 +27,14 @@ COLLECTION = os.getenv("COLLECTION", "docs")
 
 CLOUD_USD_PER_CALL = float(os.getenv("CLOUD_USD_PER_CALL", "0.01"))
 DOCS_DIR = os.getenv("DOCS_DIR", "./docs")
+# Dashboard "Test via gateway" hits this from inside the container network.
+GATEWAY_CHAT_URL = os.getenv(
+    "GATEWAY_CHAT_URL",
+    "http://apim-gateway:8082/local0/v1/chat/completions",
+)
 
 # Watched substrings for POST /learn. Empty = store nothing (safe default).
-_LEARN_TAGS = [t.strip() for t in os.getenv("LEARN_TAGS", "refund,shipping").split(",") if t.strip()]
+_LEARN_TAGS = [t.strip() for t in os.getenv("LEARN_TAGS", "gravitee").split(",") if t.strip()]
 
 # --- THRESHOLD: read at boot, mutable at runtime, persisted to .env ---
 _lock = threading.Lock()
@@ -37,7 +42,22 @@ _threshold = float(os.getenv("THRESHOLD", "0.55"))
 
 
 def get_learn_tags() -> list[str]:
-    return list(_LEARN_TAGS)
+    with _lock:
+        return list(_LEARN_TAGS)
+
+
+def set_learn_tags(tags) -> list[str]:
+    """Replace the watched tags and persist to .env. Accepts a list or comma string."""
+    if isinstance(tags, str):
+        tags = tags.split(",")
+    if not isinstance(tags, list):
+        raise ValueError("tags must be a list or comma-separated string")
+    clean = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+    global _LEARN_TAGS
+    with _lock:
+        _LEARN_TAGS = clean
+        _set_env_key("LEARN_TAGS", ",".join(clean))
+        return list(clean)
 
 
 def tag_match(query: str) -> bool:
@@ -58,22 +78,22 @@ def set_threshold(value: float) -> float:
     global _threshold
     with _lock:
         _threshold = value
-        _persist_threshold(value)
+        _set_env_key("THRESHOLD", str(value))
         return _threshold
 
 
-def _persist_threshold(value: float) -> None:
-    """Rewrite the THRESHOLD line in .env in place (create the file if absent).
+def _set_env_key(key: str, value: str) -> None:
+    """Rewrite the `key=` line in .env in place (create the file if absent).
 
-    ponytail: naive line rewrite, not a full dotenv writer. Fine for one key.
+    ponytail: naive line rewrite, not a full dotenv writer. Fine for our few keys.
     """
-    line = f"THRESHOLD={value}\n"
+    line = f"{key}={value}\n"
     if not ENV_PATH.exists():
         ENV_PATH.write_text(line)
         return
     lines = ENV_PATH.read_text().splitlines(keepends=True)
     for i, ln in enumerate(lines):
-        if ln.strip().startswith("THRESHOLD="):
+        if ln.strip().startswith(f"{key}="):
             lines[i] = line
             break
     else:

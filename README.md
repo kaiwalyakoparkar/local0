@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧭 local0
+<img src="assets/logo.svg" alt="local0" width="360" />
 
 **Local-first RAG endpoint that answers cheap questions locally and escalates hard ones to the cloud — automatically, behind your LLM gateway.**
 
@@ -46,7 +46,7 @@ rewrite. **v1 ships one adapter** (Gravitee APIM) — see Gateway wiring below.
 One command — checks prereqs, clones, pulls models, starts, ingests:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/local0/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kaiwalyakoparkar/local0/main/install.sh | bash
 ```
 
 Then open **http://localhost:8081/dashboard**, tune `THRESHOLD`, and you're live.
@@ -56,7 +56,7 @@ Then open **http://localhost:8081/dashboard**, tune `THRESHOLD`, and you're live
 Prefer to clone yourself?
 
 ```bash
-git clone https://github.com/<owner>/local0.git && cd local0 && make quickstart
+git clone https://github.com/kaiwalyakoparkar/local0.git && cd local0 && make quickstart
 ```
 
 Already have the models pulled? Run `make demo` instead of `quickstart`.
@@ -88,9 +88,21 @@ make down
 ## Dashboard (`:8081/dashboard`)
 
 Router-served, single page, no framework. Live routing counters, a top-score
-histogram with the threshold marker, and a **THRESHOLD slider** that persists to
-`.env`. `/config` and `/stats/reset` are **localhost-only** — never exposed
-through the gateway.
+histogram with the threshold marker, a **THRESHOLD slider**, and a **Learn tags**
+field — comma-separated keywords worth caching (persists to `.env` as
+`LEARN_TAGS`). `/config` and `/stats/reset` are **local-network only** (loopback
+plus private/Docker bridge IPs) — never exposed through the gateway. Save actions
+show an error message if the request is rejected.
+
+### Learn loop (gateway callback)
+
+When retrieval misses and the gateway reroutes to the cloud, its response-policy
+posts the final answer back to `POST /learn {query, answer}`. If the query
+contains one of the `LEARN_TAGS`, the router vectorizes the Q&A into Qdrant so the
+same question answers locally next time. `/learn` is reachable from the gateway
+(not localhost-only); the dashboard's **Test /learn** button fakes the callback
+locally. ponytail: no auth on `/learn` in v1 — add a shared secret if it's ever
+exposed beyond the gateway network.
 
 ## Configuration
 

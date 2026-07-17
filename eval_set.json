@@ -1,0 +1,12 @@
+[
+  {"query": "What is local0?", "label": "stay-local"},
+  {"query": "What does the router return when retrieval is weak?", "label": "stay-local"},
+  {"query": "Which model answers locally in local0?", "label": "stay-local"},
+  {"query": "What does the local service own versus the gateway?", "label": "stay-local"},
+  {"query": "How does escalation to the cloud model work?", "label": "stay-local"},
+  {"query": "What vector database does local0 use?", "label": "stay-local"},
+  {"query": "Write a Python function to sort a linked list", "label": "escalate"},
+  {"query": "What is the capital of France?", "label": "escalate"},
+  {"query": "Explain quantum entanglement to a five year old", "label": "escalate"},
+  {"query": "Give me a recipe for sourdough bread", "label": "escalate"}
+]

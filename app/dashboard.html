@@ -88,15 +88,37 @@
   }
   .btn.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--border); }
   .row { display: flex; gap: 10px; align-items: center; }
+  input[type=text] {
+    background: var(--plane); border: 1px solid var(--border); color: var(--ink);
+    border-radius: 10px; padding: 9px 12px; font-size: 13px; font-family: var(--font);
+  }
+  input[type=text]:focus { outline: 2px solid var(--series); outline-offset: -1px; }
+  .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip {
+    background: var(--plane); border: 1px solid var(--border); color: var(--ink-2);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .chip-x {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 0;
+  }
+  .chip-x:hover { color: var(--escalate); }
+  .tag-list:empty::after { content: "no tags — nothing is cached back"; color: var(--muted); font-size: 12px; }
   .saved { font-size: 12px; color: var(--local); opacity: 0; transition: opacity .2s; }
   .saved.show { opacity: 1; }
+  .saved.err { color: var(--escalate); }
+  .gw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 640px) { .gw-grid { grid-template-columns: 1fr; } }
+  .gw-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
+  .gw-grid input { width: 100%; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <h1>local0</h1>
+      <h1><img src="/assets/logo.svg?v=2" alt="local0" height="40" style="vertical-align:middle;display:block"></h1>
       <p class="sub">Local-first RAG · escalates weak retrieval to cloud via HTTP 424</p>
     </div>
     <button class="theme-btn" id="theme">◐ theme</button>
@@ -141,11 +163,60 @@
   </section>
 
   <section class="card">
-    <h2>Learn callback</h2>
-    <p class="hint">Fakes the gateway POST after 424→cloud. Stores only if query matches LEARN_TAGS (default includes <code>refund</code>).</p>
+    <h2>Learn tags <span class="unit" style="font-size:13px">· <span id="learned-count">0</span> cached</span></h2>
+    <p class="hint">Keywords worth caching. When an escalated query contains one of these, the gateway's cloud answer is vectorized into Qdrant so it answers locally next time. Comma-separated. Persisted to .env.</p>
     <div class="row">
+      <input type="text" id="tags" style="flex:1" placeholder="gravitee" />
+      <button class="btn" id="save-tags">Save tags</button>
+      <span class="saved" id="tags-saved">saved ✓</span>
+    </div>
+    <div class="tag-list" id="tag-list"></div>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn" id="demo-gateway">Test via gateway</button>
       <button class="btn ghost" id="seed-learn">Test /learn</button>
       <span class="saved" id="learn-msg"></span>
+    </div>
+    <p class="hint" style="margin-top:8px">Uses <code>http://localhost:8082/local0/v1/chat/completions</code> (through Gravitee). Click twice: 1st escalates+caches, 2nd should answer locally.</p>
+  </section>
+
+  <section class="card">
+    <h2>Cached answers · <span class="unit" style="font-size:13px"><span id="cache-count">0</span> in Qdrant</span></h2>
+    <p class="hint">Cloud answers vectorized back into the vector DB via <code>/learn</code>. Next time a matching query hits, it's answered locally — no cloud call. This is the proof the cache is populated.</p>
+    <p class="hint" id="diag" style="font-family:ui-monospace,monospace;font-size:12px"></p>
+    <div id="cache-list" class="cache-list"><p class="hint" id="cache-empty">Nothing cached yet. Escalate a query matching a learn tag, or hit <em>Test /learn</em>.</p></div>
+  </section>
+
+  <section class="card">
+    <h2>Gateway connection</h2>
+    <p class="hint">Push the router + big-model fallback + the 424→reroute policy to the LLM gateway (Gravitee APIM v4) — zero console clicks. MAPI token &amp; provider key are pass-through, never logged or stored.</p>
+    <div id="gw-done" style="display:none">
+      <p class="saved show" style="font-size:15px">Connected ✓ <span id="gw-done-detail" class="hint"></span></p>
+      <button class="btn ghost" id="gw-reconfigure" style="margin-top:10px">Reconfigure</button>
+    </div>
+    <div id="gw-form">
+    <div class="gw-grid">
+      <label>MAPI base URL<input type="text" id="gw-mapi" placeholder="http://apim-rest-api:8083/management" value="http://apim-rest-api:8083/management" /></label>
+      <label>Router endpoint URL<input type="text" id="gw-router" placeholder="http://router-service:8081" value="http://router-service:8081" /></label>
+      <label>Org id<input type="text" id="gw-org" value="DEFAULT" /></label>
+      <label>Env id<input type="text" id="gw-env" value="DEFAULT" /></label>
+      <label>Bearer token<input type="text" id="gw-token" placeholder="paste MAPI token, or use user/pass below" /></label>
+      <div class="row" style="gap:10px">
+        <label style="flex:1">User<input type="text" id="gw-user" placeholder="admin" /></label>
+        <label style="flex:1">Password<input type="text" id="gw-pass" placeholder="admin" /></label>
+      </div>
+    </div>
+    <p class="hint" style="margin:18px 0 8px">Big-model fallback (provider #2) — defaults to the workshop's existing <strong>Hermes</strong> proxy (its own upstream key, cache &amp; guardrails). Leave as-is; no cloud account needed. Point elsewhere only to use your own provider.</p>
+    <div class="gw-grid">
+      <label>Name<input type="text" id="gw-fb-name" placeholder="big-model" value="hermes" /></label>
+      <label>Model<input type="text" id="gw-fb-model" placeholder="modelscope:Qwen-Ambassador/Qwen3.7-Plus" value="modelscope:Qwen-Ambassador/Qwen3.7-Plus" /></label>
+      <label>Base URL<input type="text" id="gw-fb-url" placeholder="http://apim-gateway:8082/hermes-llm" value="http://apim-gateway:8082/hermes-llm" /></label>
+      <label>API key<input type="text" id="gw-fb-key" placeholder="none for Hermes — only for external providers" /></label>
+    </div>
+    <div class="row" style="margin-top:16px;">
+      <button class="btn ghost" id="gw-test">Test connection</button>
+      <button class="btn" id="gw-deploy">Deploy</button>
+      <span class="saved" id="gw-msg"></span>
+    </div>
     </div>
   </section>
 </div>
@@ -161,7 +232,7 @@ $("theme").onclick = () => {
   document.documentElement.setAttribute("data-theme", next);
 };
 
-let threshold = 0.55, dragging = false;
+let threshold = 0.55, dragging = false, learnTags = [];
 
 function renderHist(hist, buckets, th) {
   const el = $("hist");
@@ -197,6 +268,13 @@ async function poll() {
       $("tval").textContent = threshold.toFixed(2);
     }
     renderHist(s.histogram, s.buckets, threshold);
+    $("learned-count").textContent = s.learned;
+    learnTags = s.learn_tags || [];
+    if (document.activeElement !== $("tags")) $("tags").value = learnTags.join(", ");
+    $("tag-list").innerHTML = learnTags.map(t => {
+      const safe = t.replace(/[<>&]/g, "");
+      return `<span class="chip">${safe}<button class="chip-x" data-tag="${safe}" title="remove">×</button></span>`;
+    }).join("");
   } catch (e) { /* router restarting — next tick retries */ }
 }
 
@@ -211,22 +289,86 @@ $("slider").addEventListener("input", e => {
 });
 
 $("save").onclick = async () => {
-  await fetch("/config", {method: "POST", headers: {"Content-Type": "application/json"},
+  const el = $("saved");
+  el.classList.remove("err");
+  const r = await fetch("/config", {method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({threshold})});
-  dragging = false;
-  $("saved").classList.add("show");
-  setTimeout(() => $("saved").classList.remove("show"), 1500);
+  if (r.ok) {
+    dragging = false;
+    el.textContent = "saved ✓";
+    el.classList.add("show");
+    setTimeout(() => el.classList.remove("show"), 1500);
+    poll();
+  } else {
+    const j = await r.json().catch(() => ({}));
+    el.textContent = j.detail || `save failed (${r.status})`;
+    el.classList.add("show", "err");
+    setTimeout(() => el.classList.remove("show", "err"), 3000);
+  }
 };
 
 $("reset").onclick = async () => { await fetch("/stats/reset", {method: "POST"}); poll(); };
+
+$("save-tags").onclick = async () => {
+  const el = $("tags-saved");
+  el.classList.remove("err");
+  const r = await fetch("/config", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({tags: $("tags").value})});
+  if (r.ok) {
+    el.textContent = "saved ✓";
+    el.classList.add("show");
+    setTimeout(() => el.classList.remove("show"), 1500);
+    poll();
+  } else {
+    const j = await r.json().catch(() => ({}));
+    el.textContent = j.detail || `save failed (${r.status})`;
+    el.classList.add("show", "err");
+    setTimeout(() => el.classList.remove("show", "err"), 3000);
+  }
+};
+
+$("tags").addEventListener("keydown", e => { if (e.key === "Enter") $("save-tags").click(); });
+
+$("tag-list").addEventListener("click", async e => {
+  const btn = e.target.closest(".chip-x");
+  if (!btn) return;
+  const next = learnTags.filter(t => t !== btn.dataset.tag);
+  await fetch("/config", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({tags: next.join(", ")})});
+  poll();
+});
+
+$("demo-gateway").onclick = async () => {
+  const el = $("learn-msg");
+  el.textContent = "calling gateway…";
+  el.classList.add("show");
+  try {
+    const r = await fetch("/demo/gateway-chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({query: "Does Gravitee endorse pineapple on pizza?"}),
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      el.textContent = j.detail || `failed (${r.status})`;
+    } else {
+      el.textContent = `HTTP ${j.status_code} · ${j.model || "?"} ✓`;
+    }
+  } catch (e) {
+    el.textContent = String(e);
+  }
+  setTimeout(() => el.classList.remove("show"), 4000);
+  poll();
+  pollCache();
+};
 
 $("seed-learn").onclick = async () => {
   const r = await fetch("/learn", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
-      query: "What is the refund policy?",
-      answer: "Full refund within 30 days of purchase.",
+      query: "What is Gravitee?",
+      answer: "Gravitee is an open-source API management platform (APIM) that governs, secures, and routes API and LLM traffic.",
     }),
   });
   const j = await r.json();
@@ -234,10 +376,122 @@ $("seed-learn").onclick = async () => {
   el.textContent = j.stored ? "stored ✓" : (j.reason || "skipped");
   el.classList.add("show");
   setTimeout(() => el.classList.remove("show"), 2000);
+  pollCache();
 };
 
-poll();
+async function pollCache() {
+  try {
+    const { items } = await (await fetch("/learned")).json();
+    $("cache-count").textContent = items.length;
+    const list = $("cache-list");
+    if (!items.length) {
+      list.innerHTML = '<p class="hint" id="cache-empty">Nothing cached yet. Escalate a query matching a learn tag, or hit <em>Test /learn</em>.</p>';
+      return;
+    }
+    const esc = s => (s || "").replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+    list.innerHTML = items.map(it => `
+      <details style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+        <summary style="font-weight:600;font-size:14px;cursor:pointer">${esc(it.query)}</summary>
+        <div class="hint" style="margin-top:8px">${esc(it.answer)}</div>
+      </details>`).join("");
+  } catch (e) { /* router restarting */ }
+}
+
+function gwConn() {
+  return {
+    mapi_base: $("gw-mapi").value.trim(),
+    router_url: $("gw-router").value.trim(),
+    org_id: $("gw-org").value.trim(),
+    env_id: $("gw-env").value.trim(),
+    token: $("gw-token").value.trim(),
+    user: $("gw-user").value.trim(),
+    password: $("gw-pass").value.trim(),
+    fallback: {
+      name: $("gw-fb-name").value.trim(),
+      model: $("gw-fb-model").value.trim(),
+      base_url: $("gw-fb-url").value.trim(),
+      api_key: $("gw-fb-key").value.trim(),
+    },
+  };
+}
+
+function gwFlash(text, ok) {
+  const el = $("gw-msg");
+  el.textContent = text;
+  el.classList.toggle("err", !ok);
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show", "err"), 4000);
+}
+
+function gwCollapse(detail, skipSave) {
+  $("gw-done-detail").textContent = detail || "";
+  $("gw-form").style.display = "none";
+  $("gw-done").style.display = "block";
+  if (!skipSave) gwSave(true, detail);
+}
+$("gw-reconfigure").onclick = () => {
+  $("gw-done").style.display = "none";
+  $("gw-form").style.display = "block";
+  gwSave(false);
+};
+
+// Persist non-secret gateway fields + collapsed state across refreshes, so the
+// connection card doesn't reset to the bearer-token form on reload. Secrets
+// (token / password / api_key) are intentionally NEVER stored — pass-through only,
+// so a reconnect after refresh still requires re-entering them.
+const GW_KEEP = ["gw-mapi", "gw-router", "gw-org", "gw-env", "gw-fb-name", "gw-fb-model", "gw-fb-url"];
+function gwSave(collapsed, detail) {
+  const f = {}; GW_KEEP.forEach(id => { f[id] = $(id).value; });
+  localStorage.setItem("local0.gw", JSON.stringify({f, collapsed: !!collapsed, detail: detail || ""}));
+}
+function gwRestore() {
+  let s; try { s = JSON.parse(localStorage.getItem("local0.gw")); } catch (e) { return; }
+  if (!s) return;
+  // Only restore non-empty saved values — an empty saved field must fall back to
+  // the HTML default (e.g. the Hermes base_url), not clobber it with "".
+  GW_KEEP.forEach(id => { if (s.f && s.f[id]) $(id).value = s.f[id]; });
+  if (s.collapsed) gwCollapse((s.detail || "") + " · re-enter secrets to redeploy", true);
+}
+GW_KEEP.forEach(id => $(id).addEventListener("input", () => gwSave(false)));
+
+$("gw-test").onclick = async () => {
+  gwFlash("testing…", true);
+  try {
+    const r = await fetch("/gateway/test", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(gwConn())});
+    const j = await r.json();
+    if (r.ok && j.ok) gwCollapse("— connection verified. Deploy to push the router.");
+    else if (r.ok) gwFlash("reachable but auth/endpoint rejected", false);
+    else gwFlash(j.detail || `failed (${r.status})`, false);
+  } catch (e) { gwFlash("request failed", false); }
+};
+
+$("gw-deploy").onclick = async () => {
+  gwFlash("deploying…", true);
+  try {
+    const r = await fetch("/gateway/deploy", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(gwConn())});
+    const j = await r.json();
+    if (r.ok) gwCollapse(`— call http://localhost:8082/local0/v1/chat/completions`);
+    else gwFlash(j.detail || `deploy failed (${r.status})`, false);
+  } catch (e) { gwFlash("request failed", false); }
+};
+
+async function pollDebug() {
+  try {
+    const d = await (await fetch("/debug")).json();
+    const q = d.qdrant;
+    const qs = q.reachable ? `Qdrant ✓ ${q.total} pts (${q.learned} learned)` : "Qdrant ✗ unreachable";
+    let cb = ` · escalations ${d.escalated} · /learn callbacks ${d.learn_calls}`;
+    if (d.escalated > 0 && d.learn_calls === 0) cb += " ⚠ gateway never called back";
+    $("diag").textContent = qs + cb;
+  } catch (e) { $("diag").textContent = "diagnostics unavailable"; }
+}
+gwRestore();
+poll(); pollCache(); pollDebug();
 setInterval(poll, 2000);
+setInterval(pollCache, 5000);
+setInterval(pollDebug, 3000);
 </script>
 </body>
 </html>

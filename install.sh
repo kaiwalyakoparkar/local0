@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # local0 — one-line installer.
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/local0/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/kaiwalyakoparkar/local0/main/install.sh | bash
 # Clones the repo, then runs `make quickstart` (pull models → up → ingest).
-# Read before piping to bash: https://github.com/<owner>/local0/blob/main/install.sh
+# Read before piping to bash: https://github.com/kaiwalyakoparkar/local0/blob/main/install.sh
 set -euo pipefail
 
-REPO="${LOCAL0_REPO:-https://github.com/<owner>/local0.git}"   # override: LOCAL0_REPO=...
+REPO="${LOCAL0_REPO:-https://github.com/kaiwalyakoparkar/local0.git}"   # override: LOCAL0_REPO=...
 DIR="${LOCAL0_DIR:-local0}"                                    # override: LOCAL0_DIR=...
 
 say() { printf '\033[36m▸ %s\033[0m\n' "$1"; }

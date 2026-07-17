@@ -13,6 +13,8 @@ _lock = threading.Lock()
 _total = 0
 _answered_local = 0
 _escalated = 0
+_learned = 0  # cloud answers cached back via /learn (tag matched, stored)
+_learn_calls = 0  # every POST /learn received — 0 while escalating means the gateway never called back
 # 20 buckets over cosine [0, 1] (negatives clamp to bucket 0).
 _BUCKETS = 20
 _hist = [0] * _BUCKETS
@@ -34,10 +36,22 @@ def record(top_score: float, escalated: bool) -> None:
         _hist[_bucket(top_score)] += 1
 
 
-def reset() -> None:
-    global _total, _answered_local, _escalated, _hist
+def record_learned() -> None:
+    global _learned
     with _lock:
-        _total = _answered_local = _escalated = 0
+        _learned += 1
+
+
+def record_learn_call() -> None:
+    global _learn_calls
+    with _lock:
+        _learn_calls += 1
+
+
+def reset() -> None:
+    global _total, _answered_local, _escalated, _learned, _learn_calls, _hist
+    with _lock:
+        _total = _answered_local = _escalated = _learned = _learn_calls = 0
         _hist = [0] * _BUCKETS
 
 
@@ -53,6 +67,9 @@ def snapshot() -> dict:
             "cloud_calls_avoided": _answered_local,
             "est_usd_avoided": round(_answered_local * config.CLOUD_USD_PER_CALL, 2),
             "threshold": config.get_threshold(),
+            "learned": _learned,
+            "learn_calls": _learn_calls,
+            "learn_tags": config.get_learn_tags(),
             "histogram": list(_hist),
             "buckets": _BUCKETS,
         }

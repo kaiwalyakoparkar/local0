@@ -40,8 +40,8 @@ def main(docs_dir: str) -> None:
     root = Path(docs_dir)
     files = [p for p in root.rglob("*") if p.suffix.lower() in EXTS]
     if not files:
-        print(f"No .md/.txt files under {root}", file=sys.stderr)
-        sys.exit(1)
+        print(f"No .md/.txt files under {root}, skipping ingest", file=sys.stderr)
+        return
 
     c = rag.client()
     rag.ensure_collection(c)

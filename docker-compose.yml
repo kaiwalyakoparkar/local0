@@ -2,6 +2,8 @@
 # containerized (Phase 1). Both services join the external `docker_default`
 # network so the LLM gateway can reach the router at http://router-service:8081.
 
+name: local0
+
 services:
   vectordb:
     image: qdrant/qdrant:v1.12.4
@@ -14,8 +16,14 @@ services:
 
   router-service:
     build: .
+    image: local0-router
     container_name: router-service
     env_file: .env
+    # Bind-mount .env so dashboard writes (THRESHOLD, LEARN_TAGS) persist across
+    # container recreate; env_file re-reads it on next `up`.
+    volumes:
+      - ./.env:/app/.env
+      - ./docs:/app/docs:ro
     ports:
       - "8081:8081"          # localhost dashboard + direct testing
     # host.docker.internal resolves to the host on Docker Desktop; the
