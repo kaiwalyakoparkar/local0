@@ -50,6 +50,7 @@ class Provider:
 
 class GatewayAdapter(Protocol):
     def test_connection(self, conn: Conn) -> bool: ...
+    def list_models(self, conn: Conn) -> list[dict]: ...
     def deploy_router(self, conn: Conn, router_url: str, fallback: Provider) -> tuple[str, str]: ...
     def undeploy(self, conn: Conn, api_id: str) -> None: ...
 
@@ -89,6 +90,33 @@ class GraviteeAdapter:
             return r.status_code < 400
         except httpx.HTTPError:
             return False
+
+    def list_models(self, conn: Conn) -> list[dict]:
+        """Published APIs already in the gateway, as fallback candidates.
+
+        Returns [{name, path}] — the dashboard picker fills the fallback base_url
+        from the chosen API's gateway path so operators don't retype it. Our own
+        /local0/ router APIs are excluded (they're the escalation *source*, not a
+        big-model target). Model id isn't in the /apis listing, so the picker
+        still asks for it."""
+        base = self._base(conn)
+        with self._client(conn) as c:
+            listed = c.get(f"{base}/apis", params={"page": 1, "perPage": 100})
+        listed.raise_for_status()
+        out = []
+        for a in listed.json().get("data", []):
+            name = a.get("name") or ""
+            paths = [
+                p.get("path", "")
+                for lis in (a.get("listeners") or [])
+                for p in (lis.get("paths") or [])
+            ]
+            if name.startswith("smart-local-router") or "/local0/" in paths:
+                continue
+            if not paths:
+                continue
+            out.append({"name": name, "path": paths[0]})
+        return out
 
     def deploy_router(self, conn: Conn, router_url: str, fallback: Provider) -> tuple[str, str]:
         envelope, path = build_api_definition(router_url, fallback)

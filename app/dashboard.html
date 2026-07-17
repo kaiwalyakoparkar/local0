@@ -113,6 +113,16 @@
   @media (max-width: 640px) { .gw-grid { grid-template-columns: 1fr; } }
   .gw-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
   .gw-grid input { width: 100%; }
+  .fb-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  @media (max-width: 640px) { .fb-cards { grid-template-columns: 1fr; } }
+  .fb-card { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: 12px; cursor: pointer; background: var(--surface); }
+  .fb-card:has(input:checked) { border-color: var(--escalate); box-shadow: inset 0 0 0 1px var(--escalate); }
+  .fb-card input { margin: 2px 0 0; accent-color: var(--escalate); }
+  .fb-card .t { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .fb-card .d { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .notice { font-size: 12px; color: var(--muted); background: var(--surface);
+    border: 1px solid var(--escalate); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
 </style>
 </head>
 <body>
@@ -189,34 +199,54 @@
 
   <section class="card">
     <h2>Gateway connection</h2>
-    <p class="hint">Push the router + big-model fallback + the 424→reroute policy to the LLM gateway (Gravitee APIM v4) — zero console clicks. MAPI token &amp; provider key are pass-through, never logged or stored.</p>
+    <p class="hint"><strong>A gateway is required.</strong> The router only signals escalation (HTTP 424) — it never calls the big model itself. Fallback works only once you deploy here: this pushes the router + the big-model fallback below + the 424→reroute policy to the LLM gateway (Gravitee APIM v4), zero console clicks. MAPI token &amp; provider key are pass-through, never logged or stored.</p>
     <div id="gw-done" style="display:none">
       <p class="saved show" style="font-size:15px">Connected ✓ <span id="gw-done-detail" class="hint"></span></p>
       <button class="btn ghost" id="gw-reconfigure" style="margin-top:10px">Reconfigure</button>
     </div>
     <div id="gw-form">
-    <div class="gw-grid">
-      <label>MAPI base URL<input type="text" id="gw-mapi" placeholder="http://apim-rest-api:8083/management" value="http://apim-rest-api:8083/management" /></label>
-      <label>Router endpoint URL<input type="text" id="gw-router" placeholder="http://router-service:8081" value="http://router-service:8081" /></label>
-      <label>Org id<input type="text" id="gw-org" value="DEFAULT" /></label>
-      <label>Env id<input type="text" id="gw-env" value="DEFAULT" /></label>
-      <label>Bearer token<input type="text" id="gw-token" placeholder="paste MAPI token, or use user/pass below" /></label>
-      <div class="row" style="gap:10px">
-        <label style="flex:1">User<input type="text" id="gw-user" placeholder="admin" /></label>
-        <label style="flex:1">Password<input type="text" id="gw-pass" placeholder="admin" /></label>
+    <div class="fb-cards">
+      <label class="fb-card"><input type="radio" name="gw-fb-src" value="gateway" checked />
+        <span><span class="t">Use gateway</span><span class="d">Push the router + a fallback registered on your Gravitee gateway.</span></span></label>
+      <label class="fb-card"><input type="radio" name="gw-fb-src" value="manual" />
+        <span><span class="t">Direct (no gateway)</span><span class="d">Point the router straight at a big model.</span></span></label>
+    </div>
+
+    <!-- GATEWAY MODE: MAPI connection + pick a registered fallback -->
+    <div id="gw-mode-gateway">
+      <div class="gw-grid">
+        <label>MAPI base URL<input type="text" id="gw-mapi" placeholder="http://apim-rest-api:8083/management" value="http://apim-rest-api:8083/management" /></label>
+        <label>Router endpoint URL<input type="text" id="gw-router" placeholder="http://router-service:8081" value="http://router-service:8081" /></label>
+        <label>Org id<input type="text" id="gw-org" value="DEFAULT" /></label>
+        <label>Env id<input type="text" id="gw-env" value="DEFAULT" /></label>
+        <label>Bearer token<input type="text" id="gw-token" placeholder="paste MAPI token, or use user/pass below" /></label>
+        <div class="row" style="gap:10px">
+          <label style="flex:1">User<input type="text" id="gw-user" placeholder="admin" /></label>
+          <label style="flex:1">Password<input type="text" id="gw-pass" placeholder="admin" /></label>
+        </div>
+      </div>
+      <p class="hint" style="margin:18px 0 8px">Big-model fallback (provider #2) — pick an API already registered in the gateway. Defaults to the workshop's existing <strong>Hermes</strong> proxy (its own upstream key, cache &amp; guardrails); no cloud account needed.</p>
+      <div id="gw-fb-picker-row" class="row" style="gap:10px;margin-bottom:10px">
+        <label id="gw-fb-picker-l" style="flex:1;display:none">Registered API<select id="gw-fb-picker" style="width:100%"></select></label>
+        <button class="btn ghost" id="gw-fb-load" type="button" style="align-self:flex-end">↻ Load models</button>
+        <span class="saved" id="gw-fb-msg"></span>
+      </div>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn ghost" id="gw-test">Test connection</button>
+        <button class="btn" id="gw-deploy">Deploy</button>
+        <span class="saved" id="gw-msg"></span>
       </div>
     </div>
-    <p class="hint" style="margin:18px 0 8px">Big-model fallback (provider #2) — defaults to the workshop's existing <strong>Hermes</strong> proxy (its own upstream key, cache &amp; guardrails). Leave as-is; no cloud account needed. Point elsewhere only to use your own provider.</p>
-    <div class="gw-grid">
-      <label>Name<input type="text" id="gw-fb-name" placeholder="big-model" value="hermes" /></label>
-      <label>Model<input type="text" id="gw-fb-model" placeholder="modelscope:Qwen-Ambassador/Qwen3.7-Plus" value="modelscope:Qwen-Ambassador/Qwen3.7-Plus" /></label>
-      <label>Base URL<input type="text" id="gw-fb-url" placeholder="http://apim-gateway:8082/hermes-llm" value="http://apim-gateway:8082/hermes-llm" /></label>
-      <label>API key<input type="text" id="gw-fb-key" placeholder="none for Hermes — only for external providers" /></label>
-    </div>
-    <div class="row" style="margin-top:16px;">
-      <button class="btn ghost" id="gw-test">Test connection</button>
-      <button class="btn" id="gw-deploy">Deploy</button>
-      <span class="saved" id="gw-msg"></span>
+
+    <!-- DIRECT MODE: type a provider. Not wired yet — router only emits 424. -->
+    <div id="gw-mode-manual" style="display:none">
+      <p class="notice">Direct fallback isn't available yet — the router only signals escalation (HTTP 424) and needs a gateway to actually call the big model. Use <strong>Use gateway</strong> above.</p>
+      <div class="gw-grid">
+        <label>Name<input type="text" id="gw-fb-name" placeholder="big-model" value="hermes" /></label>
+        <label>Model<input type="text" id="gw-fb-model" placeholder="modelscope:Qwen-Ambassador/Qwen3.7-Plus" value="modelscope:Qwen-Ambassador/Qwen3.7-Plus" /></label>
+        <label>Base URL<input type="text" id="gw-fb-url" placeholder="http://apim-gateway:8082/hermes-llm" value="http://apim-gateway:8082/hermes-llm" /></label>
+        <label>API key<input type="text" id="gw-fb-key" placeholder="none for Hermes — only for external providers" /></label>
+      </div>
     </div>
     </div>
   </section>
@@ -456,6 +486,56 @@ function gwRestore() {
   if (s.collapsed) gwCollapse((s.detail || "") + " · re-enter secrets to redeploy", true);
 }
 GW_KEEP.forEach(id => $(id).addEventListener("input", () => gwSave(false)));
+
+// Fallback source: "manual" (type the fields) vs "gateway" (pick an API already
+// registered in the gateway; its path prefills the callout base_url so nothing
+// gets retyped). Both write into the same gw-fb-* inputs the deploy reads.
+function gwFbGatewayOrigin() {
+  // Gateway public origin — derived from the current/default fallback base_url,
+  // so a custom deployment still targets the right host.
+  try { return new URL($("gw-fb-url").value.trim() || "http://apim-gateway:8082").origin; }
+  catch (e) { return "http://apim-gateway:8082"; }
+}
+function gwFbMode() {
+  const gw = document.querySelector('input[name="gw-fb-src"]:checked').value === "gateway";
+  // Gateway mode: MAPI connection + picker + Deploy. Direct mode: just the provider
+  // fields + the not-available notice. The provider inputs live in the (possibly
+  // hidden) direct block but stay in the DOM, so gwConn still reads their defaults
+  // and the picker can still write name/base_url for a gateway deploy.
+  $("gw-mode-gateway").style.display = gw ? "" : "none";
+  $("gw-mode-manual").style.display = gw ? "none" : "";
+}
+document.querySelectorAll('input[name="gw-fb-src"]').forEach(r => r.onchange = gwFbMode);
+gwFbMode();
+function gwFbMsg(text, ok) {
+  const el = $("gw-fb-msg");
+  el.textContent = text;
+  el.classList.toggle("err", !ok);
+  el.classList.toggle("show", !!text);
+}
+$("gw-fb-load").onclick = async () => {
+  const sel = $("gw-fb-picker"), lbl = $("gw-fb-picker-l");
+  gwFbMsg("loading…", true);
+  try {
+    const r = await fetch("/gateway/models", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(gwConn())});
+    const j = await r.json();
+    if (!r.ok) { lbl.style.display = "none"; gwFbMsg(j.detail || "failed", false); return; }
+    const models = j.models || [];
+    if (!models.length) { lbl.style.display = "none"; gwFbMsg("no APIs found", false); return; }
+    sel.innerHTML = '<option value="">— select —</option>' +
+      models.map(m => `<option value="${esc(m.path)}" data-name="${esc(m.name)}">${esc(m.name)} (${esc(m.path)})</option>`).join("");
+    lbl.style.display = "";
+    gwFbMsg("", true);
+  } catch (e) { lbl.style.display = "none"; gwFbMsg("request failed", false); }
+};
+$("gw-fb-picker").onchange = () => {
+  const opt = $("gw-fb-picker").selectedOptions[0];
+  if (!opt || !opt.value) return;
+  $("gw-fb-url").value = gwFbGatewayOrigin() + opt.value.replace(/\/$/, "");
+  $("gw-fb-name").value = opt.dataset.name || "";
+  gwSave(false);
+};
 
 $("gw-test").onclick = async () => {
   gwFlash("testing…", true);

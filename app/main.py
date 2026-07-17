@@ -304,6 +304,25 @@ async def gateway_test(req: Request):
     return {"ok": make_adapter("gravitee").test_connection(conn)}
 
 
+@app.post("/gateway/models")
+async def gateway_models(req: Request):
+    """Dashboard fallback picker → APIs already registered in the gateway.
+
+    Public path is turned into a callout base_url client-side (gateway origin +
+    path), so the operator picks an existing provider instead of retyping it."""
+    if not _is_local(req):
+        return JSONResponse(status_code=403, content={"detail": "local access only"})
+    body = await req.json()
+    try:
+        conn = _conn_from(body)
+    except (KeyError, AttributeError):
+        return JSONResponse(status_code=400, content={"detail": "mapi_base required"})
+    try:
+        return {"models": make_adapter("gravitee").list_models(conn)}
+    except httpx.HTTPError as e:
+        return JSONResponse(status_code=502, content={"detail": f"list failed: {e}"})
+
+
 @app.post("/gateway/deploy")
 async def gateway_deploy(req: Request):
     """Dashboard 'Deploy' → push router #1 + big-model #2 + 424-reroute policy to the gateway."""
