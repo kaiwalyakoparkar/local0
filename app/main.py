@@ -76,7 +76,9 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="local0", version="1.0.0", lifespan=_lifespan)
-_DASHBOARD = Path(__file__).parent / "dashboard.html"
+_UI_DIR = Path(__file__).parent / "ui"
+_DASHBOARD = _UI_DIR / "index.html"
+app.mount("/ui", StaticFiles(directory=_UI_DIR), name="ui")
 app.mount("/assets", StaticFiles(directory=Path(__file__).parent.parent / "assets"), name="assets")
 
 ESCALATE_BODY = {"detail": "no local context, escalate"}
@@ -302,6 +304,7 @@ def get_stats():
     return stats.snapshot()
 
 
+@app.get("/", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
     return _DASHBOARD.read_text()
@@ -313,13 +316,13 @@ def get_learned():
     return {"items": rag.list_learned()}
 
 
-@app.get("/docs")
+@app.get("/documents")
 def list_docs():
     """Ingested document sources with chunk counts — powers the Documents view."""
     return {"items": rag.list_sources()}
 
 
-@app.post("/docs")
+@app.post("/documents")
 async def add_doc(req: Request):
     """Ingest one document from the UI: {name, text}. Admin-gated (writes to Qdrant)."""
     if not _admin_ok(req):
@@ -339,7 +342,7 @@ async def add_doc(req: Request):
     return {"source": name, "chunks": n}
 
 
-@app.delete("/docs/{source:path}")
+@app.delete("/documents/{source:path}")
 async def delete_doc(source: str, req: Request):
     """Delete every chunk of one ingested document. Admin-gated."""
     if not _admin_ok(req):

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>local0 — Smart Local Router</title>
+  <link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">local0 <small>Smart Local Router</small></div>
+    <div class="spacer"></div>
+    <input class="token" id="admintok" type="password" placeholder="X-Admin-Token (optional)">
+  </header>
+
+  <nav class="tabs">
+    <button data-view="chat" class="active">Chat</button>
+    <button data-view="documents">Documents</button>
+    <button data-view="learned">Learned</button>
+    <button data-view="routing">Routing &amp; Stats</button>
+  </nav>
+
+  <main>
+    <!-- CHAT -->
+    <section class="view active" id="view-chat">
+      <div class="card">
+        <h2>Chat playground</h2>
+        <p class="muted">Answers from the local model when retrieval is strong; a weak or
+          missing match returns HTTP&nbsp;424 and the gateway reroutes to the cloud model.</p>
+        <div id="chatlog"></div>
+        <div class="chatbar">
+          <textarea id="chatinput" class="grow" rows="1" placeholder="Ask about your ingested docs…"></textarea>
+          <button class="btn" id="send">Send</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- DOCUMENTS -->
+    <section class="view" id="view-documents">
+      <div class="card">
+        <h2>Add a document</h2>
+        <div class="row"><input class="text" id="docname" placeholder="source name, e.g. faq.md"></div>
+        <div class="row"><textarea id="doctext" rows="6" placeholder="Paste document text…"></textarea></div>
+        <div class="row"><button class="btn" id="adddoc">Ingest document</button>
+          <span class="muted" id="docstatus"></span></div>
+      </div>
+      <div class="card">
+        <h2>Ingested documents</h2>
+        <table><thead><tr><th>Source</th><th>Chunks</th><th></th></tr></thead>
+          <tbody id="doclist"></tbody></table>
+      </div>
+    </section>
+
+    <!-- LEARNED -->
+    <section class="view" id="view-learned">
+      <div class="card">
+        <h2>Learned answers <span class="muted">(cached cloud responses, newest first)</span></h2>
+        <table><thead><tr><th>Question</th><th>Answer</th></tr></thead>
+          <tbody id="learnlist"></tbody></table>
+      </div>
+    </section>
+
+    <!-- ROUTING -->
+    <section class="view" id="view-routing">
+      <div class="tiles" id="tiles"></div>
+      <div class="card">
+        <h2>Retrieval score distribution</h2>
+        <p class="muted">Each request's top retrieval score. Bars left of the threshold escalate to cloud.</p>
+        <div class="hist" id="hist"></div>
+        <div class="axis"><span>0.0</span><span>threshold</span><span>1.0</span></div>
+      </div>
+      <div class="card">
+        <h2>Routing threshold</h2>
+        <div class="row">
+          <input type="range" id="thr" min="0" max="1" step="0.01">
+          <span class="slider-val" id="thrval">—</span>
+          <button class="btn ghost" id="savethr">Save</button>
+        </div>
+        <div class="row">
+          <div class="grow"><label class="fld">Learn tags (comma-separated; empty = answer everything locally)</label>
+            <input class="text" id="tags" placeholder="gravitee"></div>
+          <button class="btn ghost" id="savetags">Save</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Health</h2>
+        <div class="row" id="health"></div>
+        <div class="row"><button class="btn ghost" id="resetstats">Reset stats</button></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>
