@@ -15,9 +15,17 @@ from . import config, ollama
 
 TOP_K = 4
 
+# Shared client (pooled) + a one-shot "collection exists" flag so the hot path
+# skips a collection_exists() round-trip on every request after the first hit.
+_client: QdrantClient | None = None
+_collection_seen = False
+
 
 def client() -> QdrantClient:
-    return QdrantClient(url=config.QDRANT_URL)
+    global _client
+    if _client is None:
+        _client = QdrantClient(url=config.QDRANT_URL)
+    return _client
 
 
 def ensure_collection(c: QdrantClient) -> None:
@@ -47,13 +55,20 @@ def retrieve(query: str, k: int = TOP_K) -> tuple[list[dict], float]:
     top_score is the highest cosine similarity in [-1, 1]. Empty/absent
     collection → ([], 0.0).
     """
+    global _collection_seen
     c = client()
-    if not c.collection_exists(config.COLLECTION):
-        return [], 0.0
-    vec = ollama.embed(query)
-    hits = c.query_points(
-        collection_name=config.COLLECTION, query=vec, limit=k, with_payload=True
-    ).points
+    if not _collection_seen:
+        if not c.collection_exists(config.COLLECTION):
+            return [], 0.0
+        _collection_seen = True  # exists once → skip the round-trip on later calls
+    try:
+        vec = ollama.embed(query)
+        hits = c.query_points(
+            collection_name=config.COLLECTION, query=vec, limit=k, with_payload=True
+        ).points
+    except Exception:
+        _collection_seen = False  # collection may have been dropped; re-check next time
+        raise
     if not hits:
         return [], 0.0
     chunks = [{"text": h.payload.get("text", ""), "source": h.payload.get("source", "")}

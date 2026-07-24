@@ -12,16 +12,32 @@ from . import config
 # CPU Qwen serializes and can be slow on first token; generous read timeout.
 _TIMEOUT = httpx.Timeout(120.0, connect=5.0)
 
+# Shared client: pooled connections + connect-retries (free — transport-level, no
+# extra dep). One per process, reused across the threadpool that serves requests.
+_client = httpx.Client(timeout=_TIMEOUT, transport=httpx.HTTPTransport(retries=1))
+
+
+class OllamaError(RuntimeError):
+    """Ollama unreachable or returned an unexpected shape.
+
+    Raised instead of leaking a KeyError/HTTPError so the hot path can catch one
+    type and escalate (424) rather than 500ing on a local-model outage.
+    """
+
 
 def embed(text: str) -> list[float]:
     """Return the embedding vector for `text` via nomic-embed-text."""
-    r = httpx.post(
-        f"{config.OLLAMA_URL}/api/embeddings",
-        json={"model": config.EMBED_MODEL, "prompt": text},
-        timeout=_TIMEOUT,
-    )
-    r.raise_for_status()
-    vec = r.json()["embedding"]
+    try:
+        r = _client.post(
+            f"{config.OLLAMA_URL}/api/embeddings",
+            json={"model": config.EMBED_MODEL, "prompt": text},
+        )
+        r.raise_for_status()
+        vec = r.json()["embedding"]
+    except httpx.HTTPError as e:
+        raise OllamaError(f"embeddings request failed: {e}") from e
+    except (KeyError, ValueError) as e:  # ValueError covers non-JSON body
+        raise OllamaError(f"embeddings response malformed: {e}") from e
     if len(vec) != config.EMBED_DIM:
         raise ValueError(
             f"embedding dim {len(vec)} != configured EMBED_DIM {config.EMBED_DIM}; "
@@ -30,19 +46,36 @@ def embed(text: str) -> list[float]:
     return vec
 
 
-def chat(messages: list[dict]) -> str:
-    """Non-streaming chat completion via qwen3:0.6b. Returns the answer text."""
-    r = httpx.post(
-        f"{config.OLLAMA_URL}/api/chat",
-        # think=False: qwen3 emits <think>…</think> reasoning by default. On a 0.6B
-        # CPU model that stalls the first token (looks like a black box) and its "the
-        # context does not mention…" musings false-trip the refusal gate. We want the
-        # answer, not the reasoning.
-        json={"model": config.GEN_MODEL, "messages": messages, "stream": False, "think": False},
-        timeout=_TIMEOUT,
-    )
-    r.raise_for_status()
-    return r.json()["message"]["content"]
+def chat(messages: list[dict]) -> tuple[str, dict]:
+    """Non-streaming chat completion via qwen3:0.6b.
+
+    Returns (answer_text, usage) where usage carries Ollama's real
+    prompt_eval_count / eval_count as OpenAI-style token fields.
+    """
+    try:
+        r = _client.post(
+            f"{config.OLLAMA_URL}/api/chat",
+            # think=False: qwen3 emits <think>…</think> reasoning by default. On a 0.6B
+            # CPU model that stalls the first token (looks like a black box) and its "the
+            # context does not mention…" musings false-trip the refusal gate. We want the
+            # answer, not the reasoning.
+            json={"model": config.GEN_MODEL, "messages": messages, "stream": False, "think": False},
+        )
+        r.raise_for_status()
+        data = r.json()
+        content = data["message"]["content"]
+    except httpx.HTTPError as e:
+        raise OllamaError(f"chat request failed: {e}") from e
+    except (KeyError, ValueError) as e:
+        raise OllamaError(f"chat response malformed: {e}") from e
+    prompt_tokens = int(data.get("prompt_eval_count") or 0)
+    completion_tokens = int(data.get("eval_count") or 0)
+    usage = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+    return content, usage
 
 
 def models_ready() -> tuple[bool, list[str]]:
@@ -52,7 +85,7 @@ def models_ready() -> tuple[bool, list[str]]:
     used a bare name, so match on prefix.
     """
     try:
-        r = httpx.get(f"{config.OLLAMA_URL}/api/tags", timeout=httpx.Timeout(5.0))
+        r = _client.get(f"{config.OLLAMA_URL}/api/tags", timeout=httpx.Timeout(5.0))
         r.raise_for_status()
     except httpx.HTTPError:
         return False, [config.GEN_MODEL, config.EMBED_MODEL]

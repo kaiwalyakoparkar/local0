@@ -14,18 +14,36 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
+import os
 import re
 import time
 import uuid
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, ollama, rag, stats
 from .gateway import Conn, Provider, make_adapter
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+log = logging.getLogger("local0")
+
+
+async def _json_or_none(req: Request):
+    """Parse a JSON body, returning None on malformed input (caller → 400)."""
+    try:
+        return await req.json()
+    except (json.JSONDecodeError, ValueError):
+        return None
+
 
 app = FastAPI(title="local0", version="1.0.0")
 _DASHBOARD = Path(__file__).parent / "dashboard.html"
@@ -63,8 +81,12 @@ def _strip_think(answer: str) -> str:
 
     Belt-and-suspenders for Ollama builds that ignore the think flag — the reasoning
     must never reach the client (black box) nor the refusal gate (false escalation).
+    A truncated stream can leave an unterminated <think> with no closing tag; drop
+    that whole tail too rather than leaking half a reasoning trace.
     """
-    return re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
+    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL)
+    answer = re.sub(r"<think>.*$", "", answer, flags=re.DOTALL)  # unterminated tail
+    return answer.strip()
 
 
 def _is_refusal(answer: str) -> bool:
@@ -91,7 +113,7 @@ def _build_prompt(chunks: list[dict], query: str) -> list[dict]:
     return [{"role": "system", "content": system}, {"role": "user", "content": query}]
 
 
-def _openai_response(answer: str) -> dict:
+def _openai_response(answer: str, usage: dict) -> dict:
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
         "object": "chat.completion",
@@ -102,7 +124,7 @@ def _openai_response(answer: str) -> dict:
             "message": {"role": "assistant", "content": answer},
             "finish_reason": "stop",
         }],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "usage": usage,
     }
 
 
@@ -130,7 +152,15 @@ def _openai_sse(answer: str):
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: Request):
-    body = await req.json()
+    body = await _json_or_none(req)
+    if body is None:
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
+    # The chat path does blocking I/O (Ollama generation up to 120s, Qdrant search).
+    # Run it in the threadpool so one slow request doesn't stall the whole event loop.
+    return await run_in_threadpool(_handle_chat, body)
+
+
+def _handle_chat(body: dict) -> Response:
     # Default to SSE. Hermes sends no `stream` flag yet force-parses the response
     # as SSE, so JSON would read as an empty stream. Only an explicit stream:false
     # opts into a JSON body.
@@ -152,13 +182,29 @@ async def chat_completions(req: Request):
         stats.record(0.0, escalated=True)
         return JSONResponse(status_code=424, content=ESCALATE_BODY)
 
-    chunks, top_score = rag.retrieve(query)
+    # Fail-open: an Ollama or Qdrant outage escalates to cloud (424) rather than
+    # 500ing the client. Availability first — the whole point of the router is that
+    # a weak/broken local path reroutes, and "broken" includes infra down.
+    try:
+        chunks, top_score = rag.retrieve(query)
+    except Exception:
+        log.exception("retrieval failed; escalating")
+        stats.record(0.0, escalated=True)
+        return JSONResponse(status_code=424, content=ESCALATE_BODY)
+
     thr = config.get_threshold()
     if top_score < thr:  # answer not found: retrieval too weak
         stats.record(top_score, escalated=True)
         return JSONResponse(status_code=424, content=ESCALATE_BODY)
 
-    answer = _strip_think(ollama.chat(_build_prompt(chunks, query)))
+    try:
+        raw, usage = ollama.chat(_build_prompt(chunks, query))
+    except Exception:
+        log.exception("local generation failed; escalating")
+        stats.record(top_score, escalated=True)
+        return JSONResponse(status_code=424, content=ESCALATE_BODY)
+
+    answer = _strip_think(raw)
     # Retrieval score alone can't tell "topic-adjacent but answer-absent" (~0.71)
     # from a real hit (~0.77). If the local model says it can't answer from context
     # (or returns nothing once reasoning is stripped), treat that as answer-not-found.
@@ -172,7 +218,7 @@ async def chat_completions(req: Request):
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
-    return JSONResponse(status_code=200, content=_openai_response(answer))
+    return JSONResponse(status_code=200, content=_openai_response(answer, usage))
 
 
 @app.get("/health")
@@ -243,7 +289,9 @@ async def set_config(req: Request):
     # Config surface must not be publicly reachable — local/private network only.
     if not _is_local(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
-    body = await req.json()
+    body = await _json_or_none(req)
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
     out: dict = {}
     try:
         if "threshold" in body:
@@ -317,7 +365,9 @@ async def gateway_test(req: Request):
     """Dashboard 'Test connection' → GatewayAdapter.test_connection. Secrets pass-through, never logged."""
     if not _is_local(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
-    body = await req.json()
+    body = await _json_or_none(req)
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
     try:
         conn = _conn_from(body)
     except (KeyError, AttributeError):
@@ -333,7 +383,9 @@ async def gateway_models(req: Request):
     path), so the operator picks an existing provider instead of retyping it."""
     if not _is_local(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
-    body = await req.json()
+    body = await _json_or_none(req)
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
     try:
         conn = _conn_from(body)
     except (KeyError, AttributeError):
@@ -349,7 +401,9 @@ async def gateway_deploy(req: Request):
     """Dashboard 'Deploy' → push router #1 + big-model #2 + 424-reroute policy to the gateway."""
     if not _is_local(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
-    body = await req.json()
+    body = await _json_or_none(req)
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
     try:
         conn = _conn_from(body)
         fb = body["fallback"]

@@ -14,11 +14,12 @@ from app import main, rag, ollama, config  # noqa: E402
 
 client = TestClient(main.app)
 MSG = {"messages": [{"role": "user", "content": "what is X?"}]}
+_USAGE = {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
 
 
 def _patch(monkeypatch, top_score):
     monkeypatch.setattr(rag, "retrieve", lambda q, k=4: ([{"text": "ctx", "source": "d"}], top_score))
-    monkeypatch.setattr(ollama, "chat", lambda m: "local answer")
+    monkeypatch.setattr(ollama, "chat", lambda m: ("local answer", _USAGE))
     monkeypatch.setattr(config, "get_threshold", lambda: 0.55)
     # These cases test the score/refusal gate, not the keyword gate — let every query
     # through as in-scope.
@@ -70,7 +71,7 @@ def test_strip_think():
 def test_424_empty_after_strip(monkeypatch):
     # Model returned only reasoning; stripped answer is empty -> escalate, don't 200 blank.
     _patch(monkeypatch, top_score=0.9)
-    monkeypatch.setattr(ollama, "chat", lambda m: "<think>no idea</think>")
+    monkeypatch.setattr(ollama, "chat", lambda m: ("<think>no idea</think>", _USAGE))
     r = client.post("/v1/chat/completions", json=MSG)
     assert r.status_code == 424
 
@@ -78,6 +79,39 @@ def test_424_empty_after_strip(monkeypatch):
 def test_400_malformed():
     r = client.post("/v1/chat/completions", json={"messages": []})
     assert r.status_code == 400
+
+
+def test_400_bad_json():
+    # Non-JSON body must 400, not 500.
+    r = client.post("/v1/chat/completions", data="{not json",
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 400
+
+
+def test_424_on_retrieval_outage(monkeypatch):
+    # Qdrant/Ollama down mid-retrieval -> fail-open to cloud (424), never 500.
+    _patch(monkeypatch, top_score=0.9)
+    def boom(q, k=4):
+        raise RuntimeError("qdrant unreachable")
+    monkeypatch.setattr(rag, "retrieve", boom)
+    r = client.post("/v1/chat/completions", json=MSG)
+    assert r.status_code == 424
+
+
+def test_424_on_generation_outage(monkeypatch):
+    # Ollama down mid-generation -> escalate, not 500.
+    _patch(monkeypatch, top_score=0.9)
+    def boom(m):
+        raise ollama.OllamaError("ollama down")
+    monkeypatch.setattr(ollama, "chat", boom)
+    r = client.post("/v1/chat/completions", json=MSG)
+    assert r.status_code == 424
+
+
+def test_usage_reported(monkeypatch):
+    _patch(monkeypatch, top_score=0.9)
+    r = client.post("/v1/chat/completions", json={**MSG, "stream": False})
+    assert r.json()["usage"] == _USAGE
 
 
 def test_400_no_user_message():
