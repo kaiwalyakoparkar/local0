@@ -126,23 +126,55 @@ def _is_refusal(answer: str) -> bool:
     return any(m in a for m in _REFUSAL_MARKERS)
 
 
+def _v1_error(status: int, message: str, etype: str = "invalid_request_error") -> JSONResponse:
+    """OpenAI-shaped error envelope for /v1/* client errors. (424 keeps its own
+    {"detail": ...} body — the gateway policy keys on status, not the body.)"""
+    return JSONResponse(status_code=status,
+                        content={"error": {"message": message, "type": etype, "code": None}})
+
+
+def _content_text(content) -> str:
+    """Flatten OpenAI message content to text.
+
+    Accepts a plain string or the content-parts array (vision/structured
+    messages), joining the text parts and ignoring non-text (e.g. image_url).
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return ""
+
+
 def _last_user_message(messages: list[dict]) -> str | None:
     for m in reversed(messages):
         if m.get("role") == "user":
-            content = m.get("content")
-            if isinstance(content, str) and content.strip():
-                return content
+            text = _content_text(m.get("content")).strip()
+            if text:
+                return text
     return None
 
 
-def _build_prompt(chunks: list[dict], query: str) -> list[dict]:
+def _build_prompt(chunks: list[dict], messages: list[dict], query: str) -> list[dict]:
     context = "\n\n".join(f"[{c['source']}]\n{c['text']}" for c in chunks)
     system = (
         "Answer the question using ONLY the context below. "
         "If the context is insufficient, say so briefly.\n\n"
         f"Context:\n{context}"
     )
-    return [{"role": "system", "content": system}, {"role": "user", "content": query}]
+    # Carry prior conversation turns (multi-turn) after the context system message;
+    # drop any client system prompt (ours governs grounding) and re-append the
+    # current user query last so it's what the model answers.
+    prior = [
+        {"role": m["role"], "content": _content_text(m.get("content"))}
+        for m in messages[:-1]
+        if m.get("role") in ("user", "assistant") and _content_text(m.get("content")).strip()
+    ]
+    return [{"role": "system", "content": system}, *prior,
+            {"role": "user", "content": query}]
 
 
 def _sources(chunks: list[dict]) -> list[dict]:
@@ -207,8 +239,9 @@ async def chat_completions(req: Request):
     rid = uuid.uuid4().hex[:12]
     body = await _json_or_none(req)
     if body is None:
-        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"},
-                            headers={"X-Request-Id": rid})
+        resp = _v1_error(400, "invalid JSON body")
+        resp.headers["X-Request-Id"] = rid
+        return resp
     # The chat path does blocking I/O (Ollama generation up to 120s, Qdrant search).
     # Run it in the threadpool so one slow request doesn't stall the whole event loop.
     t0 = time.perf_counter()
@@ -228,11 +261,11 @@ def _handle_chat(body: dict) -> Response:
 
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
-        return JSONResponse(status_code=400, content={"detail": "messages required"})
+        return _v1_error(400, "messages required")
 
     query = _last_user_message(messages)
     if query is None:
-        return JSONResponse(status_code=400, content={"detail": "no user message"})
+        return _v1_error(400, "no user message")
 
     # Keyword gate: a query outside our local scope (LEARN_TAGS set but no match)
     # escalates straight to cloud without a local attempt. /learn's tag_match then
@@ -258,7 +291,7 @@ def _handle_chat(body: dict) -> Response:
         return JSONResponse(status_code=424, content=ESCALATE_BODY)
 
     try:
-        raw, usage = ollama.chat(_build_prompt(chunks, query))
+        raw, usage = ollama.chat(_build_prompt(chunks, messages, query))
     except Exception:
         log.exception("local generation failed; escalating")
         stats.record(top_score, escalated=True)

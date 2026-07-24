@@ -114,6 +114,38 @@ def test_usage_reported(monkeypatch):
     assert r.json()["usage"] == _USAGE
 
 
+def test_error_envelope(monkeypatch):
+    # /v1/* client errors use the OpenAI {"error": {...}} shape.
+    r = client.post("/v1/chat/completions", json={"messages": []})
+    assert r.status_code == 400
+    assert r.json()["error"]["type"] == "invalid_request_error"
+
+
+def test_content_parts_accepted(monkeypatch):
+    _patch(monkeypatch, top_score=0.9)
+    body = {"stream": False, "messages": [
+        {"role": "user", "content": [
+            {"type": "text", "text": "what is X?"},
+            {"type": "image_url", "image_url": {"url": "data:…"}}]}]}
+    r = client.post("/v1/chat/completions", json=body)
+    assert r.status_code == 200
+
+
+def test_multi_turn_forwarded(monkeypatch):
+    _patch(monkeypatch, top_score=0.9)
+    captured = {}
+    monkeypatch.setattr(ollama, "chat",
+                        lambda m: (captured.setdefault("m", m), ("ok", _USAGE))[1])
+    body = {"stream": False, "messages": [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply"},
+        {"role": "user", "content": "second"}]}
+    client.post("/v1/chat/completions", json=body)
+    roles = [m["role"] for m in captured["m"]]
+    assert roles == ["system", "user", "assistant", "user"]
+    assert captured["m"][-1]["content"] == "second"
+
+
 def test_400_no_user_message():
     r = client.post("/v1/chat/completions",
                     json={"messages": [{"role": "assistant", "content": "hi"}]})
