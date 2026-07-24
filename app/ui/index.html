@@ -3,14 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>local0 — Smart Local Router</title>
+  <title>local0 · Local-first RAG</title>
+  <link rel="icon" href="/assets/favicon.svg?v=2" type="image/svg+xml">
   <link rel="stylesheet" href="/ui/style.css">
 </head>
 <body>
   <header class="top">
-    <div class="brand">local0 <small>Smart Local Router</small></div>
+    <div class="logo">
+      <img src="/assets/logo.svg?v=2" alt="local0">
+      <p class="sub">Local-first RAG · escalates weak retrieval to cloud via HTTP&nbsp;424</p>
+    </div>
     <div class="spacer"></div>
-    <input class="token" id="admintok" type="password" placeholder="X-Admin-Token (optional)">
+    <input class="token" id="admintok" type="password" placeholder="X-Admin-Token" title="Admin token for config/document/deploy actions">
+    <button class="theme-btn" id="theme">◐ theme</button>
   </header>
 
   <nav class="tabs">
@@ -25,7 +30,7 @@
     <section class="view active" id="view-chat">
       <div class="card">
         <h2>Chat playground</h2>
-        <p class="muted">Answers from the local model when retrieval is strong; a weak or
+        <p class="hint">Answers from the local model when retrieval is strong; a weak or
           missing match returns HTTP&nbsp;424 and the gateway reroutes to the cloud model.</p>
         <div id="chatlog"></div>
         <div class="chatbar">
@@ -39,10 +44,11 @@
     <section class="view" id="view-documents">
       <div class="card">
         <h2>Add a document</h2>
+        <p class="hint">Chunked, embedded, and upserted immediately. Re-adding the same name replaces it.</p>
         <div class="row"><input class="text" id="docname" placeholder="source name, e.g. faq.md"></div>
         <div class="row"><textarea id="doctext" rows="6" placeholder="Paste document text…"></textarea></div>
         <div class="row"><button class="btn" id="adddoc">Ingest document</button>
-          <span class="muted" id="docstatus"></span></div>
+          <span class="hint" id="docstatus"></span></div>
       </div>
       <div class="card">
         <h2>Ingested documents</h2>
@@ -54,7 +60,8 @@
     <!-- LEARNED -->
     <section class="view" id="view-learned">
       <div class="card">
-        <h2>Learned answers <span class="muted">(cached cloud responses, newest first)</span></h2>
+        <h2>Learned answers</h2>
+        <p class="hint">Cloud responses cached back by the gateway, newest first — served locally next time.</p>
         <table><thead><tr><th>Question</th><th>Answer</th></tr></thead>
           <tbody id="learnlist"></tbody></table>
       </div>
@@ -64,10 +71,18 @@
     <section class="view" id="view-routing">
       <div class="tiles" id="tiles"></div>
       <div class="card">
+        <h2>Local vs escalated</h2>
+        <div class="meter" id="meter"></div>
+        <div class="legend">
+          <span><i class="l-local"></i>Answered local</span>
+          <span><i class="l-esc"></i>Escalated to cloud</span>
+        </div>
+      </div>
+      <div class="card">
         <h2>Retrieval score distribution</h2>
-        <p class="muted">Each request's top retrieval score. Bars left of the threshold escalate to cloud.</p>
+        <p class="hint">Each request's top retrieval score. Bars left of the threshold escalate to cloud.</p>
         <div class="hist" id="hist"></div>
-        <div class="axis"><span>0.0</span><span>threshold</span><span>1.0</span></div>
+        <div class="axis"><span>0.0</span><span>1.0</span></div>
       </div>
       <div class="card">
         <h2>Routing threshold</h2>
@@ -84,7 +99,7 @@
       </div>
       <div class="card">
         <h2>Health</h2>
-        <div class="row" id="health"></div>
+        <div class="row" id="health" style="flex-wrap:wrap"></div>
         <div class="row"><button class="btn ghost" id="resetstats">Reset stats</button></div>
       </div>
     </section>

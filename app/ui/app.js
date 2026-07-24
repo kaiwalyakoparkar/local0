@@ -6,6 +6,16 @@ const tokEl = $("admintok");
 tokEl.value = localStorage.getItem("local0_admin_token") || "";
 tokEl.addEventListener("change", () => localStorage.setItem("local0_admin_token", tokEl.value));
 
+// --- theme toggle (persisted) ---
+const savedTheme = localStorage.getItem("local0_theme");
+if (savedTheme) document.documentElement.setAttribute("data-theme", savedTheme);
+$("theme").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("local0_theme", next);
+});
+
 function adminHeaders(extra) {
   const h = Object.assign({ "Content-Type": "application/json" }, extra || {});
   if (tokEl.value) h["X-Admin-Token"] = tokEl.value;
@@ -131,39 +141,48 @@ let threshold = 0.5;
 async function loadStats() {
   const s = await jget("/stats");
   threshold = s.threshold;
-  $("tiles").innerHTML = [
-    ["Total requests", s.total],
-    ["Answered local", s.answered_local],
-    ["Escalated", `${s.escalated} (${s.escalated_pct}%)`],
-    ["Cloud calls avoided", s.cloud_calls_avoided],
-    ["Est. $ avoided", "$" + s.est_usd_avoided],
-    ["Learned", s.learned],
-  ].map(([l, n]) => `<div class="tile"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+  const tile = (l, n, cls) =>
+    `<div class="tile ${cls || ""}"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  $("tiles").innerHTML =
+    tile("Total requests", s.total) +
+    tile("Answered local", s.answered_local) +
+    tile("Escalated", `${s.escalated_pct}<span class="unit">%</span>`, "accent") +
+    tile("Cloud $ avoided", `<span class="unit">$</span>${s.est_usd_avoided}`) +
+    tile("Learned", s.learned);
+
+  // local vs escalated meter
+  const localPct = s.total ? (100 * s.answered_local / s.total) : 0;
+  $("meter").innerHTML =
+    `<span class="m-local" style="width:${localPct}%"></span>` +
+    `<span class="m-esc" style="width:${100 - localPct}%"></span>`;
 
   const hist = s.histogram || [], buckets = s.buckets || hist.length || 1;
   const max = Math.max(1, ...hist);
   const thrBucket = Math.round(threshold * buckets);
-  $("hist").innerHTML = hist.map((v, i) =>
-    `<div class="bar ${i < thrBucket ? "below" : ""}" style="height:${(v / max) * 100}%" title="${v}"></div>`).join("");
+  $("hist").innerHTML =
+    hist.map((v, i) =>
+      `<div class="bar ${i < thrBucket ? "dim" : ""}" style="height:${(v / max) * 100}%" title="${v}"></div>`).join("") +
+    `<div class="thmark" style="left:${threshold * 100}%" data-l="thr ${threshold.toFixed(2)}"></div>`;
 
   $("thr").value = threshold; $("thrval").textContent = threshold.toFixed(2);
   $("tags").value = (s.learn_tags || []).join(", ");
 
   const dbg = await jget("/debug").catch(() => ({}));
   const q = dbg.qdrant || {};
-  // escalated>0 with learn_calls==0 means the gateway never called /learn back —
-  // a sign the 424-reroute policy isn't wired.
-  const rerouteOk = !(dbg.escalated > 0 && dbg.learn_calls === 0);
-  const rerouteLabel = dbg.escalated > 0
-    ? (rerouteOk ? "reroute active" : "no /learn callback — check gateway policy")
-    : "no escalations yet";
+  // Reroute state: three levels, not a binary alarm. No escalations yet, or a
+  // standalone run without a gateway, is normal — amber "info", never red.
+  let rrState, rrLabel;
+  if (!(dbg.escalated > 0)) { rrState = "neutral"; rrLabel = "no escalations yet"; }
+  else if (dbg.learn_calls > 0) { rrState = "ok"; rrLabel = "gateway reroute active"; }
+  else { rrState = "warn"; rrLabel = "awaiting gateway /learn callback"; }
   $("health").innerHTML =
-    pill(q.reachable, `Qdrant ${q.reachable ? "up" : "down"}`) +
-    pill(q.total > 0, `${q.total || 0} vectors`) +
-    pill(rerouteOk, rerouteLabel);
+    pill(q.reachable ? "ok" : "bad", `Qdrant ${q.reachable ? "up" : "down"}`) +
+    pill(q.total > 0 ? "ok" : "neutral", `${q.total || 0} vectors`) +
+    pill(rrState, rrLabel);
 }
-function pill(ok, label) {
-  return `<span class="pill"><span class="dot ${ok ? "ok" : "bad"}"></span>${esc(label)}</span>`;
+function pill(state, label) {
+  const cls = { ok: "ok", bad: "bad", warn: "warn", neutral: "" }[state] || "";
+  return `<span class="pill ${cls}"><span class="dot"></span>${esc(label)}</span>`;
 }
 $("thr").addEventListener("input", () => $("thrval").textContent = (+$("thr").value).toFixed(2));
 $("savethr").addEventListener("click", async () => {
