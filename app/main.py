@@ -12,6 +12,8 @@ ignores HTTP status (Phase-0 smoke), so the policy is mandatory.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import ipaddress
 import json
 import logging
@@ -46,7 +48,32 @@ async def _json_or_none(req: Request):
         return None
 
 
-app = FastAPI(title="local0", version="1.0.0")
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Startup gate: block until Ollama models + Qdrant are ready, else exit non-zero.
+
+    Satisfies "the router does not start serving until models are ready" — a missing
+    model or dead vector DB should fail fast (container restart retries) rather than
+    surface as mid-request escalations. STARTUP_TIMEOUT=0 skips the gate (tests/dev).
+    """
+    deadline = time.monotonic() + config.STARTUP_TIMEOUT
+    while config.STARTUP_TIMEOUT > 0:
+        models_ok, missing = await run_in_threadpool(ollama.models_ready)
+        qdrant_ok = (await run_in_threadpool(rag.qdrant_status))["reachable"]
+        if models_ok and qdrant_ok:
+            break
+        if time.monotonic() > deadline:
+            log.error("startup gate timed out: missing_models=%s qdrant_ok=%s",
+                      missing, qdrant_ok)
+            raise SystemExit(1)
+        log.warning("waiting for dependencies: missing_models=%s qdrant_ok=%s",
+                    missing, qdrant_ok)
+        await asyncio.sleep(3)
+    log.info("startup gate passed; router ready")
+    yield
+
+
+app = FastAPI(title="local0", version="1.0.0", lifespan=_lifespan)
 _DASHBOARD = Path(__file__).parent / "dashboard.html"
 app.mount("/assets", StaticFiles(directory=Path(__file__).parent.parent / "assets"), name="assets")
 
@@ -153,12 +180,20 @@ def _openai_sse(answer: str):
 
 @app.post("/v1/chat/completions")
 async def chat_completions(req: Request):
+    rid = uuid.uuid4().hex[:12]
     body = await _json_or_none(req)
     if body is None:
-        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"},
+                            headers={"X-Request-Id": rid})
     # The chat path does blocking I/O (Ollama generation up to 120s, Qdrant search).
     # Run it in the threadpool so one slow request doesn't stall the whole event loop.
-    return await run_in_threadpool(_handle_chat, body)
+    t0 = time.perf_counter()
+    resp = await run_in_threadpool(_handle_chat, body)
+    ms = (time.perf_counter() - t0) * 1000
+    resp.headers["X-Request-Id"] = rid
+    # status encodes the decision: 200 local, 424 escalate, 4xx client error.
+    log.info("chat rid=%s status=%s ms=%.0f", rid, resp.status_code, ms)
+    return resp
 
 
 def _handle_chat(body: dict) -> Response:
@@ -224,10 +259,16 @@ def _handle_chat(body: dict) -> Response:
 
 @app.get("/health")
 def health():
-    ok, missing = ollama.models_ready()
+    models_ok, missing = ollama.models_ready()
+    qdrant_ok = rag.qdrant_status()["reachable"]
+    ok = models_ok and qdrant_ok
     return JSONResponse(
         status_code=200 if ok else 503,
-        content={"status": "ok" if ok else "not ready", "missing_models": missing},
+        content={
+            "status": "ok" if ok else "not ready",
+            "missing_models": missing,
+            "qdrant_reachable": qdrant_ok,
+        },
     )
 
 

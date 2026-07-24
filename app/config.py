@@ -35,6 +35,10 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 LEARN_TOKEN = os.getenv("LEARN_TOKEN", "")
 MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", "65536"))
 MAX_LEARN_CHARS = int(os.getenv("MAX_LEARN_CHARS", "8000"))
+
+# Startup gate: how long to wait for Ollama models + Qdrant before giving up.
+# On timeout the process exits non-zero so the container restart policy retries.
+STARTUP_TIMEOUT = int(os.getenv("STARTUP_TIMEOUT", "120"))
 DOCS_DIR = os.getenv("DOCS_DIR", "./docs")
 # Dashboard "Test via gateway" hits this from inside the container network.
 GATEWAY_CHAT_URL = os.getenv(
