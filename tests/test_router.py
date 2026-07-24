@@ -20,6 +20,9 @@ def _patch(monkeypatch, top_score):
     monkeypatch.setattr(rag, "retrieve", lambda q, k=4: ([{"text": "ctx", "source": "d"}], top_score))
     monkeypatch.setattr(ollama, "chat", lambda m: "local answer")
     monkeypatch.setattr(config, "get_threshold", lambda: 0.55)
+    # These cases test the score/refusal gate, not the keyword gate — let every query
+    # through as in-scope.
+    monkeypatch.setattr(config, "tag_match", lambda q: True)
 
 
 def test_200_local(monkeypatch):
@@ -43,6 +46,33 @@ def test_424_escalate(monkeypatch):
     r = client.post("/v1/chat/completions", json=MSG)
     assert r.status_code == 424
     assert r.json() == {"detail": "no local context, escalate"}
+
+
+def test_424_keyword_miss(monkeypatch):
+    # Query outside local scope (LEARN_TAGS set, no match) escalates before any
+    # retrieval/model call — /learn won't store it either.
+    _patch(monkeypatch, top_score=0.9)
+    monkeypatch.setattr(config, "get_learn_tags", lambda: ["gravitee"])
+    monkeypatch.setattr(config, "tag_match", lambda q: False)
+    called = {"retrieve": False}
+    monkeypatch.setattr(rag, "retrieve", lambda q, k=4: called.__setitem__("retrieve", True) or ([], 0.9))
+    r = client.post("/v1/chat/completions", json=MSG)
+    assert r.status_code == 424
+    assert called["retrieve"] is False  # escalated without a local attempt
+
+
+def test_strip_think():
+    assert main._strip_think("<think>the context does not mention X</think>Real answer") == "Real answer"
+    # Reasoning-only output collapses to empty -> caller treats as answer-not-found.
+    assert main._strip_think("<think>hmm</think>   ") == ""
+
+
+def test_424_empty_after_strip(monkeypatch):
+    # Model returned only reasoning; stripped answer is empty -> escalate, don't 200 blank.
+    _patch(monkeypatch, top_score=0.9)
+    monkeypatch.setattr(ollama, "chat", lambda m: "<think>no idea</think>")
+    r = client.post("/v1/chat/completions", json=MSG)
+    assert r.status_code == 424
 
 
 def test_400_malformed():

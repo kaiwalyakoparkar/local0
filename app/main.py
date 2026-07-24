@@ -40,16 +40,31 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 _REFUSAL_MARKERS = (
     "does not mention",
     "does not provide",
+    "does not include",
+    "does not contain",
     "not mentioned in the context",
     "not in the context",
     "no information",
     "context does not",
     "doesn't mention",
     "doesn't provide",
+    "doesn't include",
+    "doesn't contain",
     "cannot answer",
     "can't answer",
+    "cannot provide an answer",
+    "can't provide an answer",
     "unable to answer",
 )
+
+
+def _strip_think(answer: str) -> str:
+    """Drop any <think>…</think> reasoning the model leaked despite think=False.
+
+    Belt-and-suspenders for Ollama builds that ignore the think flag — the reasoning
+    must never reach the client (black box) nor the refusal gate (false escalation).
+    """
+    return re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
 
 
 def _is_refusal(answer: str) -> bool:
@@ -129,19 +144,25 @@ async def chat_completions(req: Request):
     if query is None:
         return JSONResponse(status_code=400, content={"detail": "no user message"})
 
+    # Keyword gate: a query outside our local scope (LEARN_TAGS set but no match)
+    # escalates straight to cloud without a local attempt. /learn's tag_match then
+    # also refuses to store it, so an off-topic query is never learned. Empty tags =
+    # unscoped, answer everything locally (old behaviour).
+    if config.get_learn_tags() and not config.tag_match(query):
+        stats.record(0.0, escalated=True)
+        return JSONResponse(status_code=424, content=ESCALATE_BODY)
+
     chunks, top_score = rag.retrieve(query)
     thr = config.get_threshold()
-    escalate = top_score < thr
-
-    if escalate:
+    if top_score < thr:  # answer not found: retrieval too weak
         stats.record(top_score, escalated=True)
         return JSONResponse(status_code=424, content=ESCALATE_BODY)
 
-    answer = ollama.chat(_build_prompt(chunks, query))
+    answer = _strip_think(ollama.chat(_build_prompt(chunks, query)))
     # Retrieval score alone can't tell "topic-adjacent but answer-absent" (~0.71)
-    # from a real hit (~0.77). If the local model itself says it can't answer from
-    # context, treat that as a weak-retrieval signal and escalate.
-    if _is_refusal(answer):
+    # from a real hit (~0.77). If the local model says it can't answer from context
+    # (or returns nothing once reasoning is stripped), treat that as answer-not-found.
+    if not answer or _is_refusal(answer):
         stats.record(top_score, escalated=True)
         return JSONResponse(status_code=424, content=ESCALATE_BODY)
     stats.record(top_score, escalated=False)

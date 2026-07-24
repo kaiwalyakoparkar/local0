@@ -34,7 +34,11 @@ def chat(messages: list[dict]) -> str:
     """Non-streaming chat completion via qwen3:0.6b. Returns the answer text."""
     r = httpx.post(
         f"{config.OLLAMA_URL}/api/chat",
-        json={"model": config.GEN_MODEL, "messages": messages, "stream": False},
+        # think=False: qwen3 emits <think>…</think> reasoning by default. On a 0.6B
+        # CPU model that stalls the first token (looks like a black box) and its "the
+        # context does not mention…" musings false-trip the refusal gate. We want the
+        # answer, not the reasoning.
+        json={"model": config.GEN_MODEL, "messages": messages, "stream": False, "think": False},
         timeout=_TIMEOUT,
     )
     r.raise_for_status()
