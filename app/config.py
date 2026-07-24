@@ -61,6 +61,20 @@ _LEARN_TAGS = [t.strip() for t in os.getenv("LEARN_TAGS", "gravitee").split(",")
 _lock = threading.Lock()
 _threshold = float(os.getenv("THRESHOLD", "0.55"))
 
+# --- Gateway management connection: read at boot, rotatable at runtime, persisted.
+# Without a live gateway the router's 424 escalation dead-ends, so the dashboard
+# probes this connection to show whether escalations will route. Token rotates when
+# the gateway container restarts; operator re-saves it via POST /gateway/connect.
+_GATEWAY_KEYS = ("mapi_base", "org_id", "env_id", "token", "user", "password")
+_gateway = {
+    "mapi_base": os.getenv("GATEWAY_MAPI_BASE", ""),
+    "org_id": os.getenv("GATEWAY_ORG_ID", ""),
+    "env_id": os.getenv("GATEWAY_ENV_ID", ""),
+    "token": os.getenv("GATEWAY_TOKEN", ""),
+    "user": os.getenv("GATEWAY_USER", ""),
+    "password": os.getenv("GATEWAY_PASSWORD", ""),
+}
+
 
 def get_learn_tags() -> list[str]:
     with _lock:
@@ -101,6 +115,33 @@ def set_threshold(value: float) -> float:
         _threshold = value
         _set_env_key("THRESHOLD", str(value))
         return _threshold
+
+
+def get_gateway_conn() -> dict:
+    """Current persisted gateway management connection (includes the bearer token)."""
+    with _lock:
+        return dict(_gateway)
+
+
+def gateway_configured() -> bool:
+    """True once enough is set to attempt a probe: mapi_base plus some auth."""
+    with _lock:
+        return bool(_gateway["mapi_base"] and (_gateway["token"] or _gateway["user"]))
+
+
+def set_gateway_conn(fields: dict) -> None:
+    """Persist the gateway connection (rotate token) and update the in-memory copy.
+
+    mapi_base is required; any omitted key is cleared. Env keys are GATEWAY_<KEY>.
+    """
+    mapi = (fields.get("mapi_base") or "").strip()
+    if not mapi:
+        raise ValueError("mapi_base required")
+    with _lock:
+        for k in _GATEWAY_KEYS:
+            v = (fields.get(k) or "").strip() if isinstance(fields.get(k), str) else ""
+            _gateway[k] = mapi if k == "mapi_base" else v
+            _set_env_key(f"GATEWAY_{k.upper()}", _gateway[k])
 
 
 def _set_env_key(key: str, value: str) -> None:

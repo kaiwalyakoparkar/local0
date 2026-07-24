@@ -19,15 +19,15 @@
   </header>
 
   <nav class="tabs">
-    <button data-view="chat" class="active">Chat</button>
+    <button data-view="chat">Chat</button>
     <button data-view="documents">Documents</button>
     <button data-view="learned">Learned</button>
-    <button data-view="routing">Routing &amp; Stats</button>
+    <button data-view="routing" class="active">Routing &amp; Stats</button>
   </nav>
 
   <main>
     <!-- CHAT -->
-    <section class="view active" id="view-chat">
+    <section class="view" id="view-chat">
       <div class="card">
         <h2>Chat playground</h2>
         <p class="hint">Answers from the local model when retrieval is strong; a weak or
@@ -68,7 +68,12 @@
     </section>
 
     <!-- ROUTING -->
-    <section class="view" id="view-routing">
+    <section class="view active" id="view-routing">
+      <div id="gwbanner" class="banner" hidden>
+        <strong>Gateway not connected.</strong>
+        Weak-retrieval requests return HTTP 424 to escalate — but with no gateway wired up,
+        that 424 dead-ends and no bigger model answers. Connect a gateway below to route escalations.
+      </div>
       <div class="tiles" id="tiles"></div>
       <div class="card">
         <h2>Local vs escalated</h2>
@@ -101,6 +106,29 @@
         <h2>Health</h2>
         <div class="row" id="health" style="flex-wrap:wrap"></div>
         <div class="row"><button class="btn ghost" id="resetstats">Reset stats</button></div>
+      </div>
+      <div class="card">
+        <h2>Gateway connection</h2>
+        <p class="hint">Management API + bearer token. The token rotates when the gateway
+          container restarts — re-save it here (no router restart needed).</p>
+        <div class="row">
+          <div class="grow"><label class="fld">Management API base URL</label>
+            <input class="text" id="gw_mapi" placeholder="https://apim-management:8083/management/v2"></div>
+        </div>
+        <div class="row">
+          <div class="grow"><label class="fld">Org ID</label>
+            <input class="text" id="gw_org" placeholder="DEFAULT"></div>
+          <div class="grow"><label class="fld">Env ID</label>
+            <input class="text" id="gw_env" placeholder="DEFAULT"></div>
+        </div>
+        <div class="row">
+          <div class="grow"><label class="fld">Bearer token</label>
+            <input class="text" id="gw_token" type="password" placeholder="paste management API token"></div>
+        </div>
+        <div class="row">
+          <button class="btn" id="gwsave">Save &amp; test</button>
+          <span id="gwresult" class="hint"></span>
+        </div>
       </div>
     </section>
   </main>

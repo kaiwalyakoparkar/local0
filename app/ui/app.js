@@ -175,7 +175,17 @@ async function loadStats() {
   if (!(dbg.escalated > 0)) { rrState = "neutral"; rrLabel = "no escalations yet"; }
   else if (dbg.learn_calls > 0) { rrState = "ok"; rrLabel = "gateway reroute active"; }
   else { rrState = "warn"; rrLabel = "awaiting gateway /learn callback"; }
+  // Live gateway probe: is there a connected gateway to route 424 escalations to?
+  const gw = await fetch("/gateway/status", { headers: adminHeaders() })
+    .then((r) => r.json()).catch(() => ({ configured: false, connected: false }));
+  let gwState, gwLabel;
+  if (!gw.configured) { gwState = "bad"; gwLabel = "Gateway not connected — escalations won't route"; }
+  else if (gw.connected) { gwState = "ok"; gwLabel = "Gateway connected"; }
+  else { gwState = "bad"; gwLabel = "Gateway unreachable — escalations won't route"; }
+  $("gwbanner").hidden = gw.connected;
+
   $("health").innerHTML =
+    pill(gwState, gwLabel) +
     pill(q.reachable ? "ok" : "bad", `Qdrant ${q.reachable ? "up" : "down"}`) +
     pill(q.total > 0 ? "ok" : "neutral", `${q.total || 0} vectors`) +
     pill(rrState, rrLabel);
@@ -200,3 +210,18 @@ $("resetstats").addEventListener("click", async () => {
   const r = await fetch("/stats/reset", { method: "POST", headers: adminHeaders() });
   if (r.ok) { toast("stats reset"); loadStats(); } else { toast("reset failed (admin token?)"); }
 });
+$("gwsave").addEventListener("click", async () => {
+  const mapi = $("gw_mapi").value.trim();
+  if (!mapi) { toast("management API base URL required"); return; }
+  $("gwresult").textContent = "testing…";
+  const r = await fetch("/gateway/connect", { method: "POST", headers: adminHeaders(),
+    body: JSON.stringify({ mapi_base: mapi, org_id: $("gw_org").value.trim(),
+      env_id: $("gw_env").value.trim(), token: $("gw_token").value.trim() }) });
+  if (!r.ok) { $("gwresult").textContent = "save failed (admin token?)"; return; }
+  const { ok } = await r.json();
+  $("gwresult").textContent = ok ? "connected ✓" : "saved, but gateway unreachable — check URL/token";
+  loadStats();
+});
+
+// routing is the default view — populate it on load
+loadStats();

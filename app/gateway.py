@@ -80,12 +80,14 @@ class GraviteeAdapter:
         # v4 management API is environment-scoped; org_id is unused here.
         return f"{conn.mapi_base}/v2/environments/{conn.env_id}"
 
-    def _client(self, conn: Conn) -> httpx.Client:
-        return httpx.Client(headers=conn.headers(), auth=conn.auth(), timeout=30.0)
+    def _client(self, conn: Conn, timeout: float = 30.0) -> httpx.Client:
+        return httpx.Client(headers=conn.headers(), auth=conn.auth(), timeout=timeout)
 
-    def test_connection(self, conn: Conn) -> bool:
+    def test_connection(self, conn: Conn, timeout: float = 5.0) -> bool:
+        # Short default: this drives a dashboard status pill, so a down gateway must
+        # fail fast rather than hang the poll for 30s.
         try:
-            with self._client(conn) as c:
+            with self._client(conn, timeout=timeout) as c:
                 r = c.get(f"{self._base(conn)}/apis", params={"page": 1, "perPage": 1})
             return r.status_code < 400
         except httpx.HTTPError:

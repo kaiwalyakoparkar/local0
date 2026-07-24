@@ -535,6 +535,35 @@ def _conn_from(body: dict) -> Conn:
     )
 
 
+@app.post("/gateway/connect")
+async def gateway_connect(req: Request):
+    """Dashboard 'Save & test' → persist the gateway connection (rotate token), then probe.
+
+    This is how the operator re-wires the router after the gateway container restarts and
+    its management token changes. Secrets are stored, never echoed back."""
+    if not _admin_ok(req):
+        return JSONResponse(status_code=403, content={"detail": "local access only"})
+    body = await _json_or_none(req)
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
+    try:
+        config.set_gateway_conn(body)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"detail": str(e)})
+    conn = _conn_from(config.get_gateway_conn())
+    return {"ok": make_adapter("gravitee").test_connection(conn)}
+
+
+@app.get("/gateway/status")
+def gateway_status():
+    """Live probe for the dashboard: is the router connected to a gateway that will
+    route escalations? Without it, a 424 dead-ends. Returns no secrets."""
+    if not config.gateway_configured():
+        return {"configured": False, "connected": False}
+    conn = _conn_from(config.get_gateway_conn())
+    return {"configured": True, "connected": make_adapter("gravitee").test_connection(conn)}
+
+
 @app.post("/gateway/test")
 async def gateway_test(req: Request):
     """Dashboard 'Test connection' → GatewayAdapter.test_connection. Secrets pass-through, never logged."""
