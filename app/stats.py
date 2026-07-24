@@ -1,15 +1,21 @@
-"""In-memory routing counters + a top_score histogram for the dashboard.
+"""Routing counters + a top_score histogram for the dashboard.
 
-ponytail: counters reset on restart — fine for a single-user demo. Add a
---persist JSON dump only if someone needs history across restarts.
+Counters live in-process (single-replica assumption — run uvicorn with
+--workers 1) but are snapshotted to a JSON file so history survives a restart.
+ponytail: JSON is enough for 7 counters + a 20-bucket histogram; reach for SQLite
+only if this ever needs concurrent writers or per-request history.
 """
 from __future__ import annotations
 
+import json
+import os
 import threading
 
 from . import config
 
 _lock = threading.Lock()
+_dirty_since_save = 0
+_SAVE_EVERY = 20  # persist at most every N records to bound disk churn
 _total = 0
 _answered_local = 0
 _escalated = 0
@@ -26,7 +32,7 @@ def _bucket(score: float) -> int:
 
 
 def record(top_score: float, escalated: bool) -> None:
-    global _total, _answered_local, _escalated
+    global _total, _answered_local, _escalated, _dirty_since_save
     with _lock:
         _total += 1
         if escalated:
@@ -34,6 +40,10 @@ def record(top_score: float, escalated: bool) -> None:
         else:
             _answered_local += 1
         _hist[_bucket(top_score)] += 1
+        _dirty_since_save += 1
+        due = _dirty_since_save >= _SAVE_EVERY
+    if due:
+        save()
 
 
 def record_learned() -> None:
@@ -53,6 +63,49 @@ def reset() -> None:
     with _lock:
         _total = _answered_local = _escalated = _learned = _learn_calls = 0
         _hist = [0] * _BUCKETS
+    save()
+
+
+def save() -> None:
+    """Atomically snapshot the counters to STATS_PATH (temp file + rename)."""
+    path = config.STATS_PATH
+    if not path:
+        return
+    with _lock:
+        global _dirty_since_save
+        _dirty_since_save = 0
+        data = {"total": _total, "answered_local": _answered_local,
+                "escalated": _escalated, "learned": _learned,
+                "learn_calls": _learn_calls, "hist": list(_hist)}
+    try:
+        tmp = f"{path}.tmp"
+        with open(tmp, "w") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, path)
+    except OSError:
+        pass  # best-effort; losing a stats snapshot must never break a request
+
+
+def load() -> None:
+    """Restore counters from STATS_PATH on startup, if present."""
+    path = config.STATS_PATH
+    if not path or not os.path.exists(path):
+        return
+    global _total, _answered_local, _escalated, _learned, _learn_calls, _hist
+    try:
+        with open(path) as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        return
+    with _lock:
+        _total = int(d.get("total", 0))
+        _answered_local = int(d.get("answered_local", 0))
+        _escalated = int(d.get("escalated", 0))
+        _learned = int(d.get("learned", 0))
+        _learn_calls = int(d.get("learn_calls", 0))
+        h = d.get("hist") or []
+        if len(h) == _BUCKETS:
+            _hist = [int(x) for x in h]
 
 
 def snapshot() -> dict:

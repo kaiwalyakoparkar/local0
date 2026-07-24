@@ -1,4 +1,4 @@
-.PHONY: help setup models up down fresh ingest demo quickstart eval test logs seed-learn
+.PHONY: help setup models up down fresh ingest reingest demo quickstart eval test logs seed-learn
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -24,6 +24,10 @@ fresh:   ## Clean slate: wipe Qdrant volume, rebuild, restart, re-ingest (use to
 	@echo "\nFresh stack up → dashboard at http://localhost:8081/dashboard (cache empty, tags=gravitee)"
 
 ingest:  ## Ingest ./docs into Qdrant (run inside the router container)
+	docker compose exec router-service python ingest.py
+
+reingest:  ## Drop the collection and re-ingest under the current schema (v2 hybrid)
+	docker compose exec router-service python -c "from app import rag, config; c=rag.client(); c.delete_collection(config.COLLECTION) if c.collection_exists(config.COLLECTION) else None; print('dropped', config.COLLECTION)"
 	docker compose exec router-service python ingest.py
 
 demo: setup up  ## One-shot: start, wait, ingest sample docs

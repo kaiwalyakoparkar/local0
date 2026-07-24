@@ -69,8 +69,10 @@ async def _lifespan(app: FastAPI):
         log.warning("waiting for dependencies: missing_models=%s qdrant_ok=%s",
                     missing, qdrant_ok)
         await asyncio.sleep(3)
+    stats.load()  # restore counters snapshotted before the last shutdown
     log.info("startup gate passed; router ready")
     yield
+    stats.save()  # flush counters on graceful shutdown
 
 
 app = FastAPI(title="local0", version="1.0.0", lifespan=_lifespan)
@@ -141,7 +143,18 @@ def _build_prompt(chunks: list[dict], query: str) -> list[dict]:
     return [{"role": "system", "content": system}, {"role": "user", "content": query}]
 
 
-def _openai_response(answer: str, usage: dict) -> dict:
+def _sources(chunks: list[dict]) -> list[dict]:
+    """De-duplicated {source, section} citations for the answer, in-order."""
+    seen, out = set(), []
+    for c in chunks:
+        key = (c.get("source", ""), c.get("section", ""))
+        if key[0] and key not in seen:
+            seen.add(key)
+            out.append({"source": key[0], "section": key[1]})
+    return out
+
+
+def _openai_response(answer: str, usage: dict, sources: list[dict]) -> dict:
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
         "object": "chat.completion",
@@ -153,11 +166,19 @@ def _openai_response(answer: str, usage: dict) -> dict:
             "finish_reason": "stop",
         }],
         "usage": usage,
+        # Non-standard, additive: OpenAI clients ignore unknown top-level fields;
+        # our UI reads it to show which chunks grounded the answer.
+        "sources": sources,
     }
 
 
-def _openai_sse(answer: str):
-    """OpenAI chat.completion.chunk SSE (full answer in one delta, then stop)."""
+def _openai_sse(answer: str, sources: list[dict] | None = None):
+    """OpenAI chat.completion.chunk SSE (full answer in one delta, then stop).
+
+    ponytail: not truly token-streamed. The refusal gate must inspect the complete
+    answer before deciding 200-vs-424, so the whole generation is done before the
+    first byte — real streaming is impossible under that gate, not a missing feature.
+    """
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
     chunks = [
@@ -171,6 +192,7 @@ def _openai_sse(answer: str):
             "id": cid, "object": "chat.completion.chunk", "created": created,
             "model": config.GEN_MODEL,
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "sources": sources or [],
         },
     ]
     for c in chunks:
@@ -248,13 +270,14 @@ def _handle_chat(body: dict) -> Response:
         stats.record(top_score, escalated=True)
         return JSONResponse(status_code=424, content=ESCALATE_BODY)
     stats.record(top_score, escalated=False)
+    sources = _sources(chunks)
     if want_stream:
         return StreamingResponse(
-            _openai_sse(answer),
+            _openai_sse(answer, sources),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
         )
-    return JSONResponse(status_code=200, content=_openai_response(answer, usage))
+    return JSONResponse(status_code=200, content=_openai_response(answer, usage, sources))
 
 
 @app.get("/health")
@@ -288,6 +311,45 @@ def dashboard():
 def get_learned():
     """Cached Q/A entries currently in Qdrant (source=learn)."""
     return {"items": rag.list_learned()}
+
+
+@app.get("/docs")
+def list_docs():
+    """Ingested document sources with chunk counts — powers the Documents view."""
+    return {"items": rag.list_sources()}
+
+
+@app.post("/docs")
+async def add_doc(req: Request):
+    """Ingest one document from the UI: {name, text}. Admin-gated (writes to Qdrant)."""
+    if not _admin_ok(req):
+        return JSONResponse(status_code=403, content={"detail": "local access only"})
+    body = await _json_or_none(req)
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
+    name = (body.get("name") or "").strip()
+    text = body.get("text") or ""
+    if not name or not text.strip():
+        return JSONResponse(status_code=400, content={"detail": "name and text required"})
+    try:
+        n = await run_in_threadpool(rag.add_document, name, text)
+    except Exception:
+        log.exception("add_document failed")
+        return JSONResponse(status_code=502, content={"detail": "ingest failed"})
+    return {"source": name, "chunks": n}
+
+
+@app.delete("/docs/{source:path}")
+async def delete_doc(source: str, req: Request):
+    """Delete every chunk of one ingested document. Admin-gated."""
+    if not _admin_ok(req):
+        return JSONResponse(status_code=403, content={"detail": "local access only"})
+    try:
+        await run_in_threadpool(rag.delete_source, source)
+    except Exception:
+        log.exception("delete_source failed")
+        return JSONResponse(status_code=502, content={"detail": "delete failed"})
+    return {"deleted": source}
 
 
 @app.get("/debug")

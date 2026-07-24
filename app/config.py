@@ -39,6 +39,14 @@ MAX_LEARN_CHARS = int(os.getenv("MAX_LEARN_CHARS", "8000"))
 # Startup gate: how long to wait for Ollama models + Qdrant before giving up.
 # On timeout the process exits non-zero so the container restart policy retries.
 STARTUP_TIMEOUT = int(os.getenv("STARTUP_TIMEOUT", "120"))
+
+# Persist routing counters across restarts. Empty = disabled (in-memory only).
+# Compose sets this to a path on the ./data volume.
+STATS_PATH = os.getenv("STATS_PATH", "")
+
+# Hybrid-retrieval reranker: off by default (CPU cross-encoder adds latency).
+RERANK = os.getenv("RERANK", "").lower() in ("1", "true", "on", "yes")
+RERANK_MODEL = os.getenv("RERANK_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2")
 DOCS_DIR = os.getenv("DOCS_DIR", "./docs")
 # Dashboard "Test via gateway" hits this from inside the container network.
 GATEWAY_CHAT_URL = os.getenv(

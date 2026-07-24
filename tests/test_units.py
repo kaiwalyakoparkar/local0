@@ -5,7 +5,33 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ingest  # noqa: E402
-from app import stats, config  # noqa: E402
+from app import stats, config, rag, main  # noqa: E402
+
+
+def test_bm25_sparse_stable_and_nonempty():
+    # Term ids must be identical across calls/processes (crc32, not salted hash),
+    # or ingest-time and query-time sparse vectors won't line up.
+    a = rag.bm25_sparse("Gravitee gateway routing")
+    b = rag.bm25_sparse("gravitee GATEWAY routing")
+    assert a.indices and a.indices == b.indices  # case-folded, same ids
+    # single-char tokens dropped
+    assert rag.bm25_sparse("a b c").indices == []
+
+
+def test_chunk_sections_carries_heading():
+    text = "# Setup\ninstall the thing\n# Usage\nrun the thing"
+    secs = ingest.chunk_sections(text)
+    headings = {h for h, _ in secs}
+    assert "Setup" in headings and "Usage" in headings
+
+
+def test_sources_dedup():
+    chunks = [{"source": "a.md", "section": "S1"},
+              {"source": "a.md", "section": "S1"},
+              {"source": "b.md", "section": ""},
+              {"source": "", "section": "x"}]
+    out = main._sources(chunks)
+    assert out == [{"source": "a.md", "section": "S1"}, {"source": "b.md", "section": ""}]
 
 
 def test_chunk_overlap():
