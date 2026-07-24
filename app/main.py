@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 import uuid
 from pathlib import Path
@@ -284,10 +285,45 @@ def _is_local(req: Request) -> bool:
         return False
 
 
+_warned_no_admin_token = False
+
+
+def _admin_ok(req: Request) -> bool:
+    """Gate the control plane (config, deploy, secrets, stats reset).
+
+    With ADMIN_TOKEN set, require a matching X-Admin-Token header (constant-time
+    compare). Unset falls back to the Host check so local dev/demo stays
+    zero-config — but that header is client-settable, so warn once at first use.
+    """
+    if config.ADMIN_TOKEN:
+        sent = req.headers.get("x-admin-token", "")
+        return secrets.compare_digest(sent, config.ADMIN_TOKEN)
+    global _warned_no_admin_token
+    if not _warned_no_admin_token:
+        log.warning(
+            "ADMIN_TOKEN unset — control plane guarded only by a spoofable Host "
+            "header. Set ADMIN_TOKEN for any non-local deployment."
+        )
+        _warned_no_admin_token = True
+    return _is_local(req)
+
+
+@app.middleware("http")
+async def _limit_body_size(req: Request, call_next):
+    cl = req.headers.get("content-length")
+    if cl is not None:
+        try:
+            if int(cl) > config.MAX_BODY_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "request too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "invalid Content-Length"})
+    return await call_next(req)
+
+
 @app.post("/config")
 async def set_config(req: Request):
     # Config surface must not be publicly reachable — local/private network only.
-    if not _is_local(req):
+    if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
     body = await _json_or_none(req)
     if not isinstance(body, dict):
@@ -307,7 +343,7 @@ async def set_config(req: Request):
 
 @app.post("/stats/reset")
 def reset_stats(req: Request):
-    if not _is_local(req):
+    if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
     stats.reset()
     return {"status": "reset"}
@@ -316,7 +352,7 @@ def reset_stats(req: Request):
 @app.post("/demo/gateway-chat")
 async def demo_gateway_chat(req: Request):
     """Dashboard button: POST through the live gateway /local0/ path (full escalate+learn)."""
-    if not _is_local(req):
+    if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
     try:
         body = await req.json()
@@ -363,7 +399,7 @@ def _conn_from(body: dict) -> Conn:
 @app.post("/gateway/test")
 async def gateway_test(req: Request):
     """Dashboard 'Test connection' → GatewayAdapter.test_connection. Secrets pass-through, never logged."""
-    if not _is_local(req):
+    if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
     body = await _json_or_none(req)
     if not isinstance(body, dict):
@@ -381,7 +417,7 @@ async def gateway_models(req: Request):
 
     Public path is turned into a callout base_url client-side (gateway origin +
     path), so the operator picks an existing provider instead of retyping it."""
-    if not _is_local(req):
+    if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
     body = await _json_or_none(req)
     if not isinstance(body, dict):
@@ -392,14 +428,16 @@ async def gateway_models(req: Request):
         return JSONResponse(status_code=400, content={"detail": "mapi_base required"})
     try:
         return {"models": make_adapter("gravitee").list_models(conn)}
-    except httpx.HTTPError as e:
-        return JSONResponse(status_code=502, content={"detail": f"list failed: {e}"})
+    except httpx.HTTPError:
+        # Never echo the exception: it can carry the MAPI URL / auth. Log in full.
+        log.exception("gateway list_models failed")
+        return JSONResponse(status_code=502, content={"detail": "list failed"})
 
 
 @app.post("/gateway/deploy")
 async def gateway_deploy(req: Request):
     """Dashboard 'Deploy' → push router #1 + big-model #2 + 424-reroute policy to the gateway."""
-    if not _is_local(req):
+    if not _admin_ok(req):
         return JSONResponse(status_code=403, content={"detail": "local access only"})
     body = await _json_or_none(req)
     if not isinstance(body, dict):
@@ -426,8 +464,10 @@ async def gateway_deploy(req: Request):
                 "detail": f"{field} must be an absolute http(s) URL (got {url!r})"})
     try:
         api_id, path = make_adapter("gravitee").deploy_router(conn, router_url, provider)
-    except httpx.HTTPError as e:
-        return JSONResponse(status_code=502, content={"detail": f"deploy failed: {e}"})
+    except httpx.HTTPError:
+        # Exception text can carry the MAPI URL / bearer token — log, don't echo.
+        log.exception("gateway deploy failed")
+        return JSONResponse(status_code=502, content={"detail": "deploy failed"})
     return {
         "api_id": api_id,
         "path": path,
@@ -495,6 +535,12 @@ async def learn(req: Request):
     with no JSON surgery in the gateway. Side channel, never on the chat hot path;
     failures here must not block the user's cloud answer.
     """
+    # Optional shared secret: the gateway 424-reroute callout can inject a static
+    # X-Learn-Token header. When set, an unauthenticated POST can't poison the cache.
+    if config.LEARN_TOKEN and not secrets.compare_digest(
+        req.headers.get("x-learn-token", ""), config.LEARN_TOKEN
+    ):
+        return JSONResponse(status_code=403, content={"detail": "forbidden"})
     stats.record_learn_call()
     raw = (await req.body()).decode("utf-8", errors="replace")
     body: dict | None
@@ -522,6 +568,11 @@ async def learn(req: Request):
 
     if not config.tag_match(query):
         return {"stored": False, "reason": "no tag match"}
+
+    # Cap what we persist: an oversized query/answer bloats Qdrant and is a
+    # cache-poisoning lever. Tag gate + token + size cap together close it.
+    if len(query) > config.MAX_LEARN_CHARS or len(answer) > config.MAX_LEARN_CHARS:
+        return JSONResponse(status_code=400, content={"detail": "query or answer too large"})
 
     rag.upsert_learned(query.strip(), answer.strip())
     stats.record_learned()

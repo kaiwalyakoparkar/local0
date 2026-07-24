@@ -155,6 +155,21 @@ def test_config_public_denied(monkeypatch):
     assert r.json()["detail"] == "local access only"
 
 
+def test_admin_token_required(monkeypatch):
+    # With ADMIN_TOKEN set, the Host check is bypassed — only the header opens it.
+    monkeypatch.setattr(config, "ADMIN_TOKEN", "s3cret")
+    assert client.post("/config", json={"threshold": 0.42}).status_code == 403
+    r = client.post("/config", json={"threshold": 0.42},
+                    headers={"X-Admin-Token": "s3cret"})
+    assert r.status_code == 200
+
+
+def test_body_too_large(monkeypatch):
+    monkeypatch.setattr(config, "MAX_BODY_BYTES", 32)
+    big = {"messages": [{"role": "user", "content": "x" * 200}]}
+    assert client.post("/v1/chat/completions", json=big).status_code == 413
+
+
 def test_deploy_rejects_relative_urls(monkeypatch):
     # An empty/relative base_url or router_url bakes a malformed callout URL into
     # the gateway definition and 500s every escalation — reject at the boundary.

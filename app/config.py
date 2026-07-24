@@ -26,6 +26,15 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://vectordb:6333")
 COLLECTION = os.getenv("COLLECTION", "docs")
 
 CLOUD_USD_PER_CALL = float(os.getenv("CLOUD_USD_PER_CALL", "0.01"))
+
+# Control-plane auth. When ADMIN_TOKEN is set, mutating/secret endpoints require
+# an X-Admin-Token header; unset falls back to the (spoofable) Host check for
+# zero-config local dev. LEARN_TOKEN optionally gates /learn (gateway callout
+# injects it). MAX_BODY_BYTES caps request size (unbounded prompts = DoS).
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
+LEARN_TOKEN = os.getenv("LEARN_TOKEN", "")
+MAX_BODY_BYTES = int(os.getenv("MAX_BODY_BYTES", "65536"))
+MAX_LEARN_CHARS = int(os.getenv("MAX_LEARN_CHARS", "8000"))
 DOCS_DIR = os.getenv("DOCS_DIR", "./docs")
 # Dashboard "Test via gateway" hits this from inside the container network.
 GATEWAY_CHAT_URL = os.getenv(
@@ -88,14 +97,18 @@ def _set_env_key(key: str, value: str) -> None:
     ponytail: naive line rewrite, not a full dotenv writer. Fine for our few keys.
     """
     line = f"{key}={value}\n"
-    if not ENV_PATH.exists():
-        ENV_PATH.write_text(line)
-        return
-    lines = ENV_PATH.read_text().splitlines(keepends=True)
-    for i, ln in enumerate(lines):
-        if ln.strip().startswith(f"{key}="):
-            lines[i] = line
-            break
+    if ENV_PATH.exists():
+        lines = ENV_PATH.read_text().splitlines(keepends=True)
+        for i, ln in enumerate(lines):
+            if ln.strip().startswith(f"{key}="):
+                lines[i] = line
+                break
+        else:
+            lines.append(line)
+        body = "".join(lines)
     else:
-        lines.append(line)
-    ENV_PATH.write_text("".join(lines))
+        body = line
+    # Atomic: write a temp file then rename, so a crash mid-write can't truncate .env.
+    tmp = ENV_PATH.with_suffix(ENV_PATH.suffix + ".tmp")
+    tmp.write_text(body)
+    os.replace(tmp, ENV_PATH)
