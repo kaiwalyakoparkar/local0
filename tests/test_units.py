@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ingest  # noqa: E402
-from app import stats, config, rag, main  # noqa: E402
+from app import config, main, rag, stats  # noqa: E402
 
 
 def test_bm25_sparse_stable_and_nonempty():

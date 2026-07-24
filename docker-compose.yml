@@ -8,8 +8,16 @@ services:
   vectordb:
     image: qdrant/qdrant:v1.12.4
     container_name: local0-qdrant
+    restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      # qdrant image ships bash but no curl; a /dev/tcp probe confirms the port is up.
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     networks:
       - default
       - gateway
@@ -18,20 +26,34 @@ services:
     build: .
     image: local0-router
     container_name: router-service
+    restart: unless-stopped
     env_file: .env
     # Bind-mount .env so dashboard writes (THRESHOLD, LEARN_TAGS) persist across
-    # container recreate; env_file re-reads it on next `up`.
+    # container recreate; env_file re-reads it on next `up`. ./data holds the stats
+    # snapshot so routing counters survive a restart.
     volumes:
       - ./.env:/app/.env
       - ./docs:/app/docs:ro
+      - ./data:/app/data
+    environment:
+      STATS_PATH: /app/data/stats.json
     ports:
       - "8081:8081"          # localhost dashboard + direct testing
     # host.docker.internal resolves to the host on Docker Desktop; the
     # host-gateway alias makes it work on Linux too, so host Ollama is reachable.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    mem_limit: 1g            # 0.6B model runs on host Ollama; router itself is light
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
-      - vectordb
+      vectordb:
+        condition: service_healthy
     networks:
       - default
       - gateway

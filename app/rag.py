@@ -158,7 +158,7 @@ def _rerank(query: str, hits: list, k: int) -> list:
         if _reranker is None:
             _reranker = TextCrossEncoder(config.RERANK_MODEL)
         docs = [h.payload.get("text", "") for h in hits]
-        scored = sorted(zip(_reranker.rerank(query, docs), hits),
+        scored = sorted(zip(_reranker.rerank(query, docs), hits, strict=False),
                         key=lambda t: t[0], reverse=True)
         return [h for _, h in scored[:k]]
     except Exception:  # fastembed missing / model download failed → keep fused order

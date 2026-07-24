@@ -1,2 +1,12 @@
+.git
+.github
+.venv
+.venv313
+**/__pycache__
+*.pyc
+tests
+data
 assets/demo.mov
 assets/demo.gif
+plans
+*.md

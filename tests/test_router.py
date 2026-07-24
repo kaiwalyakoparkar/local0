@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import main, rag, ollama, config  # noqa: E402
+from app import config, main, ollama, rag  # noqa: E402
 
 client = TestClient(main.app)
 MSG = {"messages": [{"role": "user", "content": "what is X?"}]}

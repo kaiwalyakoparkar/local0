@@ -10,16 +10,15 @@ models:  ## Pull both models into host Ollama (gen + embed)
 	ollama pull qwen3:0.6b
 	ollama pull nomic-embed-text
 
-up:      ## Start router + qdrant
-	docker compose up --build -d
+up:      ## Start router + qdrant (waits for healthchecks)
+	docker compose up --build -d --wait
 
 down:    ## Stop everything
 	docker compose down
 
 fresh:   ## Clean slate: wipe Qdrant volume, rebuild, restart, re-ingest (use to test updates)
 	docker compose down -v
-	docker compose up --build -d
-	@echo "waiting for qdrant..." && sleep 6
+	docker compose up --build -d --wait
 	$(MAKE) ingest
 	@echo "\nFresh stack up → dashboard at http://localhost:8081/dashboard (cache empty, tags=gravitee)"
 
@@ -30,8 +29,7 @@ reingest:  ## Drop the collection and re-ingest under the current schema (v2 hyb
 	docker compose exec router-service python -c "from app import rag, config; c=rag.client(); c.delete_collection(config.COLLECTION) if c.collection_exists(config.COLLECTION) else None; print('dropped', config.COLLECTION)"
 	docker compose exec router-service python ingest.py
 
-demo: setup up  ## One-shot: start, wait, ingest sample docs
-	@echo "waiting for qdrant..." && sleep 5
+demo: setup up  ## One-shot: start (waits for healthchecks), ingest sample docs
 	$(MAKE) ingest
 	@echo "\nRouter ready → dashboard at http://localhost:8081/dashboard"
 
