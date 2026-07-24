@@ -129,15 +129,33 @@ class GraviteeAdapter:
             r.raise_for_status()
             api_id = r.json()["id"]
 
-            # Publish: read the created API back, flip lifecycleState, PUT it.
-            api = c.get(f"{base}/apis/{api_id}")
-            api.raise_for_status()
-            body = api.json()
-            body["lifecycleState"] = "PUBLISHED"
-            c.put(f"{base}/apis/{api_id}", json=body).raise_for_status()
+            # Publish/start are separate calls; if any fails after import we'd leak
+            # a half-deployed API. Roll back (best-effort) so a retry starts clean.
+            try:
+                # Publish: read the created API back, flip lifecycleState, PUT it.
+                api = c.get(f"{base}/apis/{api_id}")
+                api.raise_for_status()
+                body = api.json()
+                body["lifecycleState"] = "PUBLISHED"
+                c.put(f"{base}/apis/{api_id}", json=body).raise_for_status()
 
-            c.post(f"{base}/apis/{api_id}/_start").raise_for_status()
+                c.post(f"{base}/apis/{api_id}/_start").raise_for_status()
+            except httpx.HTTPError:
+                self._teardown(c, base, api_id)  # remove the orphaned import
+                raise
         return api_id, path
+
+    def _teardown(self, c: httpx.Client, base: str, api_id: str) -> None:
+        """Stop, close plans, delete one API on the open client (best-effort)."""
+        try:
+            c.post(f"{base}/apis/{api_id}/_stop")
+            plans = c.get(f"{base}/apis/{api_id}/plans")
+            if plans.status_code < 400:
+                for p in plans.json().get("data", []):
+                    c.post(f"{base}/apis/{api_id}/plans/{p['id']}/_close")
+            c.delete(f"{base}/apis/{api_id}")
+        except httpx.HTTPError:
+            pass  # rollback is best-effort; the original error is what matters
 
     def _purge_prior_routers(self, c: httpx.Client, base: str) -> None:
         """Stop+delete prior smart-local-router / /local0/ APIs (best-effort)."""

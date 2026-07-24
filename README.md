@@ -4,11 +4,11 @@
 
 **Local-first RAG endpoint that answers cheap questions locally and escalates hard ones to the cloud — automatically, behind your LLM gateway.**
 
-![status](https://img.shields.io/badge/status-pre--implementation-orange?style=for-the-badge)
+![status](https://img.shields.io/badge/status-implemented-success?style=for-the-badge)
 ![router](https://img.shields.io/badge/FastAPI-router-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![retrieval](https://img.shields.io/badge/retrieval-hybrid%20(dense%2BBM25%20RRF)-4c6ef5?style=for-the-badge)
 ![vectordb](https://img.shields.io/badge/Qdrant-vector%20DB-DC244C?style=for-the-badge)
 ![llm](https://img.shields.io/badge/Ollama-qwen3%3A0.6b-000000?style=for-the-badge&logo=ollama&logoColor=white)
-![gateway](https://img.shields.io/badge/LLM%20gateway-agnostic-555555?style=for-the-badge)
 ![gpu](https://img.shields.io/badge/GPU-not%20required-success?style=for-the-badge)
 
 [Quickstart](#-quickstart) · [Dashboard](#dashboard-8081dashboard) · [Config](#configuration) · [Gateway wiring](#gateway-wiring)
@@ -151,25 +151,45 @@ Everything lives in `.env` (see `.env.example`). Key knobs:
 | `COLLECTION` | Qdrant collection name. |
 | `CLOUD_USD_PER_CALL` | dashboard cost estimate (gross avoided, not net). |
 | `LEARN_TAGS` | substrings that must appear in a query before `POST /learn` stores it. |
+| `ADMIN_TOKEN` | when set, control-plane endpoints (`/config`, `/documents`, `/gateway/*`, `/stats/reset`, `/demo`) require an `X-Admin-Token` header. Unset = local-only Host check (dev). Set it for any non-local deploy. |
+| `LEARN_TOKEN` | when set, `POST /learn` requires an `X-Learn-Token` header (the gateway callout injects it). |
+| `MAX_BODY_BYTES` | reject larger request bodies with 413 (default 65536). |
+| `STARTUP_TIMEOUT` | seconds to wait for Ollama models + Qdrant before exiting non-zero (compose restarts). `0` skips the gate. |
+| `STATS_PATH` | JSON snapshot path for routing counters (compose points it at the `./data` volume). Empty = in-memory only. |
+| `RERANK` | `on` enables a CPU cross-encoder rerank of fused candidates (needs `fastembed`; off by default). |
+| `LOG_LEVEL` | `DEBUG`/`INFO`/`WARNING`/`ERROR`. |
 
 ## Layout
 
 ```
-app/main.py       FastAPI: /v1/chat/completions, /stats, /config, /dashboard, /learn, /health
-app/rag.py        Qdrant retrieve() + collection management
-app/ollama.py     host Ollama embed + chat
-app/stats.py      in-memory routing counters + histogram
-app/gateway.py    GatewayAdapter (+ Gravitee PoC impl)
-app/dashboard.html
-ingest.py         walk ./docs → chunk → embed → upsert
-eval.py           threshold sweep over a labeled eval set
-tests/            mocked unit tests (no live services)
-plans/            PRD.md + merged-plan.md (authoritative plan)
-docs/             knowledge-base corpus ingested into Qdrant
+app/main.py       FastAPI: /v1/chat/completions, /stats, /config, /documents, /learn, /health, dashboard
+app/rag.py        Qdrant hybrid retrieve() (dense + BM25 RRF) + collection management
+app/ollama.py     host Ollama embed + chat (shared pooled client)
+app/stats.py      routing counters + histogram, JSON snapshot persistence
+app/gateway.py    GatewayAdapter (+ Gravitee PoC impl, deploy with rollback)
+app/ui/           self-served dashboard (index.html, app.js, style.css) — no build step
+ingest.py         walk ./docs → section-chunk → embed → upsert (idempotent)
+eval.py           threshold sweep + confusion / precision-recall / MRR
+tests/            mocked unit tests + gateway builder tests (no live services)
+requirements-dev.txt / pyproject.toml   pytest + ruff config
+.github/workflows/ci.yml                ruff → pytest → pip-audit
+docs/sample/      committed frozen corpus for reproducible eval
 ```
+
+## Runbook
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| Every request escalates (all 424, cloud bill climbing) | Ollama or Qdrant down — the router fails **open** to cloud by design | `curl :8081/health` (503 names the culprit); restart Ollama / `docker compose restart vectordb`; check `make logs` for `retrieval failed` / `generation failed` |
+| Router container won't start / restarts | Startup gate can't reach Ollama or Qdrant within `STARTUP_TIMEOUT` | `make logs` shows `waiting for dependencies`; confirm host Ollama is up (`:11434`) and models pulled (`make models`) |
+| `collection … predates hybrid retrieval` error | Collection built under the old dense-only schema | `make reingest` (drops + rebuilds under the v2 hybrid schema) |
+| Retrieval quality poor / wrong local answers | Threshold mistuned or corpus duplicated | `make eval-fresh` for a fresh threshold + confusion matrix; re-ingest is idempotent so duplicates can't accumulate |
+| `403` from dashboard actions | `ADMIN_TOKEN` set but no header | paste the token into the dashboard's token box (stored in `localStorage`, sent as `X-Admin-Token`) |
+| Escalations happen but nothing is learned | gateway 424-reroute policy not calling `/learn` back | dashboard health panel flags "no /learn callback"; redeploy the gateway policy (`/gateway/deploy`) |
 
 ## Non-goals (v1)
 
-Streaming (`stream:true` → 400), multi-turn rewriting (last user message only),
-PDF ingestion, concurrency (CPU Qwen serializes — single-user demo), a second
-gateway adapter.
+Real token streaming (the refusal gate must read the whole answer before choosing
+200-vs-424, so SSE is one delta — see the note in `_openai_sse`), PDF ingestion,
+horizontal scale / multiple workers (routing counters + config live in-process;
+run `--workers 1`), a second gateway adapter.

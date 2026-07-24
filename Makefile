@@ -1,4 +1,4 @@
-.PHONY: help setup models up down fresh ingest reingest demo quickstart eval test logs seed-learn
+.PHONY: help setup models up down fresh ingest reingest demo quickstart eval eval-fresh test logs seed-learn
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -36,6 +36,10 @@ demo: setup up  ## One-shot: start (waits for healthchecks), ingest sample docs
 quickstart: models demo  ## Full setup from scratch: pull models → start → ingest → dashboard
 
 eval:    ## Sweep THRESHOLD against eval_set.json
+	docker compose exec router-service python eval.py
+
+eval-fresh: ## Reproducible eval: re-ingest the committed sample corpus, then sweep
+	docker compose exec router-service python ingest.py docs/sample
 	docker compose exec router-service python eval.py
 
 test:    ## Run unit tests (mocked — no Ollama/Qdrant needed)

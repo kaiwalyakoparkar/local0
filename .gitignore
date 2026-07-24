@@ -4,5 +4,8 @@ __pycache__/
 .env
 .pytest_cache/
 qdrant_storage/
-docs/
+docs/*
+!docs/sample/
 .cursor/
+data/*
+!data/.gitkeep

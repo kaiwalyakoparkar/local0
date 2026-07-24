@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Implemented. Service code lives under `app/` (`main.py`, `rag.py`, `ollama.py`, `stats.py`, `gateway.py`, `config.py`) with `ingest.py`, `eval.py`, mocked tests in `tests/`, and a `Makefile` (`make quickstart` / `demo` / `up` / `ingest` / `test` / `eval`). Build follows `plans/merged-plan.md` (the authoritative plan). Not yet published/deployed; Python service shipped via `docker compose`, not a package.
+Implemented + production-hardened. Service code lives under `app/` (`main.py`, `rag.py`, `ollama.py`, `stats.py`, `gateway.py`, `config.py`) with a self-served UI in `app/ui/` (vanilla JS, no build step), `ingest.py`, `eval.py`, tests in `tests/`, `requirements-dev.txt` + `pyproject.toml` (pytest/ruff), CI in `.github/workflows/ci.yml`, and a `Makefile` (`make quickstart` / `demo` / `up` / `ingest` / `reingest` / `test` / `eval` / `eval-fresh`). Retrieval is **hybrid** (dense nomic + stdlib BM25 sparse, fused with Qdrant server-side RRF; gate score stays dense cosine). Control plane is auth-gated via `ADMIN_TOKEN`; infra failures fail **open** to 424. Build history follows `plans/merged-plan.md` and the revamp plan in `~/.claude/plans/`. Shipped via `docker compose` (router + qdrant; host Ollama), single-replica (`--workers 1`).
 
 ## What we're building
 
